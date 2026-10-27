@@ -1,0 +1,44 @@
+appId: com.ximgs.app
+productName: xImgs
+directories:
+  buildResources: resources/ximgs
+  output: release
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources/ximgs
+    to: ximgs
+    filter:
+      - app.ico
+      - logo.png
+asar: true
+asarUnpack:
+  - '**/sql.js/dist/*'
+  - '**/*.{node,dll}'
+win:
+  executableName: ximgs
+  icon: app.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  # Prefer per-user install; default dir via installer.nsh (D:\Apps\xImgs or %USERPROFILE%\Apps\xImgs)
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  include: installer.nsh
+  shortcutName: xImgs
+  installerIcon: app.ico
+  uninstallerIcon: app.ico
+mac:
+  icon: app.ico
+  target:
+    - dmg
+  category: public.app-category.graphics-design
+npmRebuild: true

@@ -1,0 +1,78 @@
+/* xImgs Design Tokens — 单机版桌面端 */
+:root {
+  /* Surface */
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-2: #fafbfe;
+  --surface-3: #f0f4fa;
+  --line: #e8edf5;
+  --line-2: #dbe3ef;
+
+  /* Text */
+  --text: #0e1729;
+  --text-2: #5c6b84;
+  --text-3: #8b99af;
+  --text-inverse: #f4f8ff;
+
+  /* Brand */
+  --brand: #1b6ef3;
+  --brand-2: #3b8bff;
+  --brand-600: #155cd6;
+  --brand-700: #124cb4;
+  --brand-50: #edf4ff;
+  --brand-100: #dbe9ff;
+
+  /* Dark rail */
+  --navy: #0a1120;
+  --navy-2: #101b2f;
+  --navy-line: rgba(255, 255, 255, 0.08);
+  --navy-text: #e8eefb;
+  --navy-muted: #8c9db8;
+
+  /* Semantic */
+  --ok: #12a150;
+  --ok-bg: #e9f8ef;
+  --ok-line: #bfe8cf;
+  --warn: #b8790a;
+  --warn-bg: #fef5e4;
+  --warn-line: #f3dfb6;
+  --err: #d33a3a;
+  --err-bg: #fdeded;
+  --err-line: #f5c7c7;
+  --info-bg: #edf4ff;
+  --info-line: #cfe0ff;
+
+  /* Radius */
+  --r-xs: 5px;
+  --r-sm: 7px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-full: 999px;
+
+  /* Elevation */
+  --sh-1: 0 1px 2px rgba(14, 23, 41, 0.05);
+  --sh-2: 0 2px 4px -2px rgba(14, 23, 41, 0.06), 0 6px 16px -6px rgba(14, 23, 41, 0.1);
+  --sh-3: 0 18px 40px -12px rgba(14, 23, 41, 0.22), 0 4px 10px -4px rgba(14, 23, 41, 0.08);
+  --ring: 0 0 0 3px rgba(27, 110, 243, 0.16);
+
+  /* Layout */
+  --sidebar-w: 240px;
+  --titlebar-h: 44px;
+
+  /* Type */
+  --font: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  /* Motion */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --t-fast: 120ms;
+  --t: 180ms;
+
+  /* Legacy aliases (older Vue pages / components) */
+  --border: var(--line);
+  --card: var(--surface);
+  --muted: var(--text-2);
+  --accent: var(--brand);
+}

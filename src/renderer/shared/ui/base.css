@@ -1,0 +1,32 @@
+/* xImgs renderer — design system entry (ported from frontend/) */
+@import './tokens.css';
+@import './app.css';
+@import './pages.css';
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+/* Electron uses OS titlebar; design mock had a custom one — single content row. */
+.app {
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+}
+
+.app > .sidebar,
+.app > .main {
+  grid-row: 1;
+  min-height: 0;
+}
+
+.main > .page-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  height: 100%;
+}

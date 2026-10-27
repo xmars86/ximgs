@@ -1,0 +1,301 @@
+import { existsSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import { AppError } from '@shared/errors'
+import type { SyncRunResult } from '@shared/sync'
+import { emitTaskProgress } from '@main/ipc/progress'
+import { log } from '@main/runtime/logger'
+import { md5File } from '@main/domain/library/hash'
+import { getSyncSettings } from '@main/db/repos/syncSettings'
+import {
+  findSyncFileByPath,
+  listFailedRelativePaths,
+  markSyncFileError,
+  upsertSyncedFile
+} from '@main/db/repos/syncFiles'
+import { createS3Client, putObjectFile } from '@main/providers/s3'
+import {
+  b2PublicUrl,
+  createB2S3Client,
+  putB2ObjectFile,
+  resolveB2Config
+} from '@main/providers/backblaze'
+import type { S3Client } from '@aws-sdk/client-s3'
+import type { B2ResolvedConfig } from '@main/providers/backblaze'
+import { loadSyncSecret } from './secrets'
+import { scanImageFiles, type ScannedImage } from './scanner'
+import { buildObjectKey, buildPublicUrl } from './objectKey'
+import { shouldUploadFile } from './shouldUpload'
+import { assertReadyToSync } from './validate'
+
+let runInProgress = false
+let cancelRequested = false
+
+export function isSyncRunInProgress(): boolean {
+  return runInProgress
+}
+
+export function requestCancelSyncRun(): void {
+  cancelRequested = true
+}
+
+function createUploadContext(secret: string): {
+  client: S3Client
+  b2: B2ResolvedConfig | null
+  prefix: string
+  bucket: string
+  publicBaseUrl: string
+} {
+  const settings = getSyncSettings()
+  const useB2 = settings.provider !== 's3'
+  const b2 = useB2
+    ? resolveB2Config({
+        keyId: settings.accessKeyId,
+        applicationKey: secret,
+        bucketName: settings.bucket,
+        region: settings.region,
+        endpoint: settings.endpoint,
+        publicBaseUrl: settings.publicBaseUrl,
+        keyPrefix: settings.objectPrefix,
+        sseMode: settings.sseMode
+      })
+    : null
+
+  if (!useB2) {
+    if (!settings.bucket.trim() || !settings.accessKeyId.trim() || !settings.endpoint.trim()) {
+      throw new AppError(
+        'S3_CONFIG_INCOMPLETE',
+        '配置未完成，无法同步：\n- 请填写 Endpoint、Bucket、Access Key ID 与 Secret'
+      )
+    }
+  }
+
+  const client = b2
+    ? createB2S3Client(b2)
+    : createS3Client({
+        endpoint: settings.endpoint,
+        region: settings.region || 'auto',
+        bucket: settings.bucket,
+        accessKeyId: settings.accessKeyId,
+        secretAccessKey: secret,
+        forcePathStyle: Boolean(settings.endpoint.trim())
+      })
+
+  return {
+    client,
+    b2,
+    prefix: b2 ? b2.keyPrefix : settings.objectPrefix,
+    bucket: b2 ? b2.bucketName : settings.bucket,
+    publicBaseUrl: b2 ? b2.publicBaseUrl : settings.publicBaseUrl
+  }
+}
+
+async function uploadOne(
+  ctx: ReturnType<typeof createUploadContext>,
+  file: ScannedImage,
+  options: { force?: boolean } = {}
+): Promise<'uploaded' | 'skipped'> {
+  const md5 = await md5File(file.absolutePath)
+  const existing = findSyncFileByPath(file.relativePath)
+  if (
+    !options.force &&
+    existing?.status === 'synced' &&
+    existing.publicUrl &&
+    !shouldUploadFile(existing.md5, md5)
+  ) {
+    return 'skipped'
+  }
+
+  const objectKey = buildObjectKey(ctx.prefix, file.relativePath)
+  if (ctx.b2) {
+    await putB2ObjectFile(ctx.client, ctx.b2, objectKey, file.absolutePath)
+  } else {
+    await putObjectFile(ctx.client, ctx.bucket, objectKey, file.absolutePath)
+  }
+  const publicUrl = ctx.b2
+    ? b2PublicUrl(ctx.b2.publicBaseUrl, objectKey)
+    : buildPublicUrl(ctx.publicBaseUrl, objectKey)
+  upsertSyncedFile({
+    relativePath: file.relativePath,
+    md5,
+    objectKey,
+    publicUrl,
+    byteSize: file.byteSize,
+    status: 'synced',
+    lastError: null
+  })
+  return 'uploaded'
+}
+
+export async function runSyncOnce(taskId = `sync-${Date.now().toString(36)}`): Promise<SyncRunResult> {
+  if (runInProgress) {
+    throw new AppError('SYNC_BUSY', '同步正在进行中')
+  }
+
+  const settings = getSyncSettings()
+  assertReadyToSync(settings)
+  const secret = loadSyncSecret()
+  if (!secret) {
+    throw new AppError('S3_SECRET_MISSING', '缺少 Application Key / Secret（请填写并保存）')
+  }
+
+  runInProgress = true
+  cancelRequested = false
+  const result: SyncRunResult = {
+    scanned: 0,
+    uploaded: 0,
+    skipped: 0,
+    failed: 0,
+    cancelled: false
+  }
+
+  const ctx = createUploadContext(secret)
+  try {
+    const files = scanImageFiles(settings.watchFolder!)
+    result.scanned = files.length
+    if (files.length === 0) {
+      emitTaskProgress({
+        taskId,
+        phase: 'done',
+        current: 0,
+        total: 0,
+        message: '目录中没有可同步的图片'
+      })
+      return result
+    }
+
+    for (let i = 0; i < files.length; i += 1) {
+      if (cancelRequested) {
+        result.cancelled = true
+        break
+      }
+      const file = files[i]!
+      emitTaskProgress({
+        taskId,
+        phase: 'syncing',
+        current: i + 1,
+        total: files.length,
+        message: file.relativePath
+      })
+      try {
+        const outcome = await uploadOne(ctx, file)
+        if (outcome === 'skipped') result.skipped += 1
+        else result.uploaded += 1
+      } catch (error) {
+        result.failed += 1
+        const message = error instanceof Error ? error.message : String(error)
+        markSyncFileError(file.relativePath, message)
+        log.warn('Sync file failed', { path: file.relativePath, error })
+      }
+    }
+
+    emitTaskProgress({
+      taskId,
+      phase: result.cancelled ? 'cancelled' : 'done',
+      current: files.length,
+      total: files.length,
+      message: summarizeResult(result)
+    })
+    return result
+  } finally {
+    ctx.client.destroy()
+    runInProgress = false
+    cancelRequested = false
+  }
+}
+
+/** Re-upload only rows currently marked error. */
+export async function runSyncRetryFailed(
+  taskId = `sync-retry-${Date.now().toString(36)}`
+): Promise<SyncRunResult> {
+  if (runInProgress) {
+    throw new AppError('SYNC_BUSY', '同步正在进行中')
+  }
+
+  const settings = getSyncSettings()
+  assertReadyToSync(settings)
+  const secret = loadSyncSecret()
+  if (!secret) {
+    throw new AppError('S3_SECRET_MISSING', '缺少 Application Key / Secret（请填写并保存）')
+  }
+
+  const failedPaths = listFailedRelativePaths()
+  const result: SyncRunResult = {
+    scanned: failedPaths.length,
+    uploaded: 0,
+    skipped: 0,
+    failed: 0,
+    cancelled: false
+  }
+  if (failedPaths.length === 0) {
+    return result
+  }
+
+  runInProgress = true
+  cancelRequested = false
+  const ctx = createUploadContext(secret)
+  const root = settings.watchFolder!
+
+  try {
+    for (let i = 0; i < failedPaths.length; i += 1) {
+      if (cancelRequested) {
+        result.cancelled = true
+        break
+      }
+      const relativePath = failedPaths[i]!
+      const absolutePath = join(root, ...relativePath.split('/'))
+      emitTaskProgress({
+        taskId,
+        phase: 'retrying',
+        current: i + 1,
+        total: failedPaths.length,
+        message: relativePath
+      })
+
+      if (!existsSync(absolutePath)) {
+        result.failed += 1
+        markSyncFileError(relativePath, '本地文件已不存在，无法重试')
+        continue
+      }
+
+      try {
+        const st = statSync(absolutePath)
+        await uploadOne(
+          ctx,
+          { absolutePath, relativePath, byteSize: st.size },
+          { force: true }
+        )
+        result.uploaded += 1
+      } catch (error) {
+        result.failed += 1
+        const message = error instanceof Error ? error.message : String(error)
+        markSyncFileError(relativePath, message)
+        log.warn('Retry sync failed', { path: relativePath, error })
+      }
+    }
+
+    emitTaskProgress({
+      taskId,
+      phase: result.cancelled ? 'cancelled' : 'done',
+      current: failedPaths.length,
+      total: failedPaths.length,
+      message: summarizeResult(result)
+    })
+    return result
+  } finally {
+    ctx.client.destroy()
+    runInProgress = false
+    cancelRequested = false
+  }
+}
+
+function summarizeResult(result: SyncRunResult): string {
+  const parts = [
+    `uploaded=${result.uploaded}`,
+    `skipped=${result.skipped}`,
+    `failed=${result.failed}`
+  ]
+  if (result.failed > 0) {
+    parts.push('可点击「重试失败项」再次上传')
+  }
+  return parts.join(' ')
+}
