@@ -1,0 +1,45 @@
+xImgs Source-Available Proprietary License
+Copyright (c) 2024-2026 xImgs authors. All rights reserved.
+
+Summary (non-binding; Chinese summary for convenience)
+- 单机版客户端供个人免费使用。
+- 团队 / 商业用途请另行联系授权；网络版 / 企业版规划中。
+- 本仓库源码默认「可见」，不授予开源协议下的复制、修改、再分发权利，除非另有书面授权。
+- 云存储、CDN、流量等第三方费用与条款由对应服务商负责；本软件不提供云存储服务本身。
+
+1. Grant of Use (Desktop Binary / Built App)
+   You may install and use the xImgs desktop application free of charge
+   for personal (non-commercial / individual) use only, subject to this
+   License and the in-app disclaimer. Team or commercial use requires a
+   separate written license from the copyright holders.
+
+2. Source Code
+   Viewing this repository does not grant you rights under OSI-approved
+   open-source licenses. You may not copy, modify, redistribute, sublicense,
+   or create competing products from this source code without prior written
+   permission from the copyright holders.
+
+3. Contributions
+   By submitting a pull request or patch, you grant the copyright holders
+   a perpetual, worldwide, royalty-free license to use, modify, and
+   redistribute your contribution as part of xImgs.
+
+4. Trademarks
+   "xImgs" and related logos are product marks. You may not use them in a
+   way that implies endorsement without permission.
+
+5. No Warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+   OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
+   ARISING FROM USE OF THE SOFTWARE—INCLUDING BUT NOT LIMITED TO STORE
+   PENALTIES, BUSINESS LOSS, CLOUD OUTAGES, LINK FAILURES, OR DATA LOSS.
+
+6. Third-Party Services
+   Object storage and CDN providers are independent. Fees, quotas, outages,
+   and their terms are solely between you and those providers.
+
+7. Contact
+   Business / licensing inquiries: see in-app Settings → About, or open a
+   GitHub Issue on the public repository.
