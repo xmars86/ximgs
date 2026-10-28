@@ -82,6 +82,7 @@ export type IpcMethod =
   | 'system.ping'
   | 'system.getLocale'
   | 'system.setLocale'
+  | 'system.saveTextFile'
   | 'db.getStatus'
   | 'library.getRoot'
   | 'library.setRoot'
@@ -167,6 +168,14 @@ export type IpcMethodMap = {
   'system.ping': { req: void; res: { pong: true; at: string } }
   'system.getLocale': { req: void; res: { locale: AppLocale } }
   'system.setLocale': { req: { locale: AppLocale }; res: { locale: AppLocale } }
+  'system.saveTextFile': {
+    req: {
+      content: string
+      defaultPath?: string
+      filters?: { name: string; extensions: string[] }[]
+    }
+    res: { saved: boolean; path: string | null }
+  }
   'db.getStatus': { req: void; res: DbStatus }
   'library.getRoot': { req: void; res: { libraryRoot: string | null } }
   'library.setRoot': { req: { path: string }; res: { libraryRoot: string } }

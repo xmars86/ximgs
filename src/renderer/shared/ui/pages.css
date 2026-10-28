@@ -756,18 +756,30 @@
   min-height: 0;
 }
 
-.ex-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  align-items: start;
-  gap: 14px;
-  padding: 14px;
+/* Match grid-mode waterfall: scroll outside, multicol height:auto */
+.ex-gallery-scroll {
+  flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
+.ex-gallery {
+  columns: 160px;
+  column-gap: 14px;
+  padding: 14px;
+  height: auto;
+  width: 100%;
+}
+
 .ex-folder-card,
 .ex-image-card {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 14px;
+  vertical-align: top;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -812,27 +824,24 @@
 .ex-image {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
   overflow: hidden;
   background: var(--surface-3);
   border-bottom: 1px solid var(--line);
 }
 
-.ex-image > img,
-.ex-image-placeholder {
-  width: 100%;
-  height: 100%;
-}
-
 .ex-image > img {
   display: block;
-  object-fit: cover;
+  width: 100%;
+  height: auto;
 }
 
 .ex-image-placeholder {
   display: grid;
   place-items: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   color: var(--text-3);
+  background: var(--surface-3);
 }
 
 .ex-image > .badge {
@@ -855,6 +864,9 @@
 .ex-card-meta {
   padding: 9px 10px 10px;
   min-width: 0;
+  background: #fff;
+  position: relative;
+  z-index: 1;
 }
 
 .ex-card-name-row {
@@ -896,7 +908,8 @@
 }
 
 .ex-gallery > .ex-empty {
-  grid-column: 1 / -1;
+  column-span: all;
+  break-inside: avoid;
 }
 
 .ex-head,
@@ -1843,16 +1856,23 @@
   overflow: hidden;
   border: 1px solid var(--line);
   background: #f3f6fb;
-  margin-bottom: 14px;
-  height: 226px;
-  display: grid;
-  place-items: center;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  min-height: 96px;
+  /* Leave room for header/meta/link/footer so drawer-bd rarely scrolls */
+  max-height: min(36vh, calc(100vh - 240px), 640px);
+  padding: 6px;
 }
 
 .drawer-preview img {
   display: block;
-  width: 100%;
-  height: 100%;
+  max-width: 100%;
+  max-height: min(36vh, calc(100vh - 240px), 640px);
+  width: auto;
+  height: auto;
   object-fit: contain;
 }
 

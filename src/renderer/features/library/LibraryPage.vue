@@ -7,7 +7,7 @@ import { useSyncStore } from '../sync/useSyncStore'
 import { PAGE_SIZE_OPTIONS, useGalleryStore, type GalleryPageSize } from './useGalleryStore'
 import UploadDialog from './components/UploadDialog.vue'
 import UiIcon from '../../shared/ui/UiIcon.vue'
-import { toast } from '../../shared/ui/useToast'
+import { showToast, toast } from '../../shared/ui/useToast'
 
 type ViewMode = 'table' | 'grid' | 'tree'
 type LinkFmt = 'url' | 'md' | 'html' | 'ubb'
@@ -343,14 +343,87 @@ async function copyText(text: string): Promise<void> {
   toast.ok(t('library.copied'))
 }
 
-async function exportVisibleLinks(): Promise<void> {
-  const urls = sortedItems.value.map((i) => i.publicUrl).filter((u): u is string => Boolean(u))
-  if (!urls.length) {
-    gallery.infoMessage = t('library.exportEmpty')
-    return
+function csvEscape(value: string): string {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`
   }
-  await navigator.clipboard.writeText(urls.join('\n'))
-  gallery.infoMessage = t('library.exportDone', { n: urls.length })
+  return value
+}
+
+/** All files under current path (recursive), respecting search/status filters. */
+async function fetchExportCandidates(): Promise<SyncFileDto[]> {
+  const pageLimit = 500
+  const all: SyncFileDto[] = []
+  let offset = 0
+  let total = Infinity
+  const pathPrefix =
+    gallery.listingMode === 'folder' ? gallery.pathPrefix || undefined : undefined
+  while (offset < total) {
+    const res = await bridgeInvoke('sync.listFiles', {
+      limit: pageLimit,
+      offset,
+      search: gallery.search.trim() || undefined,
+      status: gallery.statusFilter || undefined,
+      pathPrefix,
+      directOnly: false
+    })
+    all.push(...res.items)
+    total = res.total
+    if (!res.items.length) break
+    offset += res.items.length
+  }
+  return all
+}
+
+async function exportVisibleLinks(): Promise<void> {
+  try {
+    const candidates = await fetchExportCandidates()
+    const rows = candidates.filter((i) => Boolean(i.publicUrl))
+    if (!rows.length) {
+      showToast(t('library.exportEmpty'), 'info', 3000)
+      return
+    }
+
+    const header = [
+      t('library.exportColName'),
+      t('library.exportColPath'),
+      t('library.exportColUrl'),
+      t('library.exportColStatus'),
+      t('library.exportColSize'),
+      t('library.exportColSyncedAt')
+    ]
+    const lines = [
+      header.map(csvEscape).join(','),
+      ...rows.map((item) =>
+        [
+          fileName(item.relativePath),
+          displayRelPath(item.relativePath),
+          item.publicUrl || '',
+          statusLabel(item.status),
+          item.byteSize != null ? String(item.byteSize) : '',
+          item.syncedAt || item.updatedAt || ''
+        ]
+          .map((cell) => csvEscape(cell))
+          .join(',')
+      )
+    ]
+    // BOM helps Excel open UTF-8 CSV correctly
+    const content = `\uFEFF${lines.join('\r\n')}\r\n`
+    const stamp = new Date().toISOString().slice(0, 10)
+    const res = await bridgeInvoke('system.saveTextFile', {
+      content,
+      defaultPath: `ximgs-links-${stamp}.csv`,
+      filters: [
+        { name: 'CSV', extensions: ['csv'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+    if (!res.saved) return
+    showToast(t('library.exportDone', { n: rows.length }), 'ok', 3000)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    toast.err(msg)
+  }
 }
 
 async function retryFailed(): Promise<void> {
@@ -407,7 +480,7 @@ const visibleTreeNodes = computed(() => {
         <button
           type="button"
           class="btn"
-          :disabled="!sortedItems.length && viewMode !== 'tree'"
+          :disabled="gallery.isLoading"
           @click="exportVisibleLinks"
         >
           <UiIcon name="copy" :size="15" />
@@ -791,78 +864,80 @@ const visibleTreeNodes = computed(() => {
             </aside>
 
             <div class="ex-list">
-              <div class="ex-gallery scroll">
-                <div v-if="gallery.isEmpty" class="ex-empty">{{ t('library.emptyFolder') }}</div>
-                <div
-                  v-for="folder in sortedFolders"
-                  :key="`ex-f-${folder.path}`"
-                  class="ex-folder-card"
-                  role="button"
-                  tabindex="0"
-                  @dblclick="openFolderRow(folder.path)"
-                  @click="selectedId = null"
-                  @keydown.enter.prevent="openFolderRow(folder.path)"
-                >
-                  <div class="ex-folder-icon">
-                    <UiIcon name="folder" :size="34" />
-                  </div>
-                  <div class="ex-card-name" :title="folder.name">{{ folder.name }}</div>
-                  <div class="ex-card-sub">
-                    {{ folder.fileCount }} {{ t('library.itemsUnit') }}
-                  </div>
-                </div>
-                <div
-                  v-for="item in sortedItems"
-                  :key="`ex-${item.id}`"
-                  class="ex-image-card"
-                  :class="{ on: selectedId === item.id }"
-                  role="button"
-                  tabindex="0"
-                  @click="selectRow(item)"
-                  @dblclick="openPreview(item)"
-                  @keydown.enter.prevent="openPreview(item)"
-                >
-                  <div class="ex-image">
-                    <img
-                      v-if="item.publicUrl"
-                      :src="item.publicUrl"
-                      :alt="fileName(item.relativePath)"
-                      loading="lazy"
-                      referrerpolicy="no-referrer"
-                    />
-                    <div v-else class="ex-image-placeholder">
-                      <UiIcon name="image" :size="28" />
+              <div class="ex-gallery-scroll scroll">
+                <div class="ex-gallery">
+                  <div v-if="gallery.isEmpty" class="ex-empty">{{ t('library.emptyFolder') }}</div>
+                  <div
+                    v-for="folder in sortedFolders"
+                    :key="`ex-f-${folder.path}`"
+                    class="ex-folder-card"
+                    role="button"
+                    tabindex="0"
+                    @dblclick="openFolderRow(folder.path)"
+                    @click="selectedId = null"
+                    @keydown.enter.prevent="openFolderRow(folder.path)"
+                  >
+                    <div class="ex-folder-icon">
+                      <UiIcon name="folder" :size="34" />
                     </div>
-                    <span
-                      class="badge"
-                      :class="{
-                        ok: item.status === 'synced',
-                        err: item.status === 'error',
-                        mute: item.status !== 'synced' && item.status !== 'error'
-                      }"
-                    >
-                      {{ statusLabel(item.status) }}
-                    </span>
-                  </div>
-                  <div class="ex-card-meta">
-                    <div class="ex-card-name-row">
-                      <div class="ex-card-name" :title="fileName(item.relativePath)">
-                        {{ fileName(item.relativePath) }}
-                      </div>
-                      <button
-                        v-if="item.publicUrl"
-                        type="button"
-                        class="btn sm ghost ex-copy"
-                        :title="t('library.copy')"
-                        :aria-label="t('library.copy')"
-                        @click.stop="copyText(item.publicUrl)"
-                      >
-                        <UiIcon name="copy" :size="13" />
-                      </button>
-                    </div>
+                    <div class="ex-card-name" :title="folder.name">{{ folder.name }}</div>
                     <div class="ex-card-sub">
-                      {{ formatExplorerDate(item.syncedAt || item.updatedAt) }} ·
-                      {{ formatBytes(item.byteSize) }}
+                      {{ folder.fileCount }} {{ t('library.itemsUnit') }}
+                    </div>
+                  </div>
+                  <div
+                    v-for="item in sortedItems"
+                    :key="`ex-${item.id}`"
+                    class="ex-image-card"
+                    :class="{ on: selectedId === item.id }"
+                    role="button"
+                    tabindex="0"
+                    @click="selectRow(item)"
+                    @dblclick="openPreview(item)"
+                    @keydown.enter.prevent="openPreview(item)"
+                  >
+                    <div class="ex-image">
+                      <img
+                        v-if="item.publicUrl"
+                        :src="item.publicUrl"
+                        :alt="fileName(item.relativePath)"
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                      />
+                      <div v-else class="ex-image-placeholder">
+                        <UiIcon name="image" :size="28" />
+                      </div>
+                      <span
+                        class="badge"
+                        :class="{
+                          ok: item.status === 'synced',
+                          err: item.status === 'error',
+                          mute: item.status !== 'synced' && item.status !== 'error'
+                        }"
+                      >
+                        {{ statusLabel(item.status) }}
+                      </span>
+                    </div>
+                    <div class="ex-card-meta">
+                      <div class="ex-card-name-row">
+                        <div class="ex-card-name" :title="fileName(item.relativePath)">
+                          {{ fileName(item.relativePath) }}
+                        </div>
+                        <button
+                          v-if="item.publicUrl"
+                          type="button"
+                          class="btn sm ghost ex-copy"
+                          :title="t('library.copy')"
+                          :aria-label="t('library.copy')"
+                          @click.stop="copyText(item.publicUrl)"
+                        >
+                          <UiIcon name="copy" :size="13" />
+                        </button>
+                      </div>
+                      <div class="ex-card-sub">
+                        {{ formatExplorerDate(item.syncedAt || item.updatedAt) }} ·
+                        {{ formatBytes(item.byteSize) }}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -889,7 +964,7 @@ const visibleTreeNodes = computed(() => {
     <UploadDialog />
 
     <div class="scrim" :class="{ show: !!gallery.preview }" @click="gallery.preview = null" />
-    <aside class="drawer" :class="{ show: !!gallery.preview }">
+    <aside class="drawer lib-drawer" :class="{ show: !!gallery.preview }">
       <template v-if="gallery.preview">
         <div class="drawer-hd">
           <h3>{{ fileName(gallery.preview.relativePath) }}</h3>
@@ -908,7 +983,7 @@ const visibleTreeNodes = computed(() => {
             <UiIcon name="x" :size="14" />
           </button>
         </div>
-        <div class="drawer-bd">
+        <div class="drawer-bd lib-drawer-bd">
           <div class="drawer-preview">
             <img
               v-if="gallery.preview.publicUrl"
@@ -999,5 +1074,20 @@ const visibleTreeNodes = computed(() => {
   place-items: center;
   background: var(--surface-3);
   color: var(--text-3);
+}
+
+.lib-drawer-bd {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.lib-drawer .drawer-sect {
+  margin: 10px 0 6px;
+}
+
+.lib-drawer .code-box {
+  max-height: 4.8em;
+  overflow: auto;
 }
 </style>
