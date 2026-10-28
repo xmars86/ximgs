@@ -1,82 +1,84 @@
 # xImgs
 
-让图片管理更简单，让出海更高效。
+Make image management simpler. Ship cross-border catalogs faster.
 
-面向跨境电商的本地图床客户端 · Windows / macOS
+A local image-hosting client for cross-border e-commerce · Windows / macOS
 
-**xImgs** 帮你把本机商品图稳定变成可复制的公网链接——原图留在自己电脑，密钥与数据本地保管，适合亚马逊、Shopify、Temu、独立站等日常铺货与素材协作。
+**xImgs** turns product photos on your machine into stable, copy-ready public URLs—originals stay on your computer, keys and data stay local. Built for day-to-day listing and asset work on Amazon, Shopify, Temu, and independent stores.
 
-单机版供 **个人免费使用**，打开即用，无需账号体系、无需自建服务器。
+The desktop edition is **free for personal use**: open and go—no account system, no self-hosted server.
+
+[中文说明](README.zh-CN.md)
 
 ---
 
-## 为什么选 xImgs
+## Why xImgs
 
-| 价值 | 说明 |
+| Value | What it means |
 |------|------|
-| **隐私优先** | 原图与密钥留在本机，仅在你主动上传时出网 |
-| **稳定出链** | 上传到你自己的对象存储，得到干净、可长期引用的链接 |
-| **省时省心** | 指定目录定时同步，变更自动增量上传，少一次手工拖拽 |
-| **业务友好** | 图库浏览、一键复制链接、产品 SKU 与封面素材管理 |
-| **个人免费** | 单机版供个人免费使用；团队 / 商业与网络版另行规划 |
+| **Privacy first** | Originals and secrets stay on your machine; network only when you upload |
+| **Stable links** | Upload to your own object storage for clean, long-lived URLs |
+| **Less busywork** | Watch a folder on a schedule; incremental uploads when files change |
+| **Business-ready** | Gallery browse, one-click copy link, product SKU and cover assets |
+| **Free for individuals** | Desktop edition free for personal use; team / commercial / network editions planned separately |
 
 ---
 
-## 核心能力
+## Core features
 
-- **目录定时同步** — 监控本地素材目录，按间隔自动上传；支持立即同步
-- **增量更新** — 按内容识别新增与变更，未改动的文件自动跳过
-- **自有存储桶** — 对接 Backblaze B2 及主流 S3 兼容服务（如 R2、OSS、MinIO 等）
-- **素材图库** — 网格 / 列表 / 目录浏览，搜索、预览、复制链接
-- **单张上传** — 临时补图、粘贴或选图上传到同一桶
-- **产品 SKU** — 维护商品编码与名称，绑定多图并设置封面，方便对账与选图
-- **同步日志** — 清晰查看最近运行结果与失败项，便于排查
-- **中英界面** — 中文 / English 一键切换
+- **Scheduled folder sync** — Watch a local asset folder; auto-upload on an interval; sync now anytime
+- **Incremental uploads** — Detect new and changed files by content; skip unchanged files
+- **Your own bucket** — Backblaze B2 and mainstream S3-compatible services (R2, OSS, MinIO, and more)
+- **Asset library** — Grid / list / folder views, search, preview, copy link
+- **Single-file upload** — Quick one-offs via paste or file picker into the same bucket
+- **Product SKUs** — Maintain codes and names, bind multiple images, set covers
+- **Sync history** — Recent runs and failures for easier troubleshooting
+- **zh / en UI** — Switch Chinese / English in one click
 
-> 云存储、流量与 CDN 费用由您选择的存储服务商收取；xImgs 本身不收取单机版使用费。
-
----
-
-## 适用人群
-
-- 跨境电商运营、美工、店铺主理人
-- 需要「本地保管原图 + 云端稳定出链」的小团队
-- 希望少搭服务、少记密码、马上能用的个人卖家
+> Cloud storage, bandwidth, and CDN costs are billed by the provider you choose. xImgs does not charge for the desktop edition itself.
 
 ---
 
-## 乐捐支持
+## Who it’s for
 
-单机版将长期免费维护。若 xImgs 帮你省了时间，欢迎自愿乐捐，请开发者喝杯咖啡，帮助项目持续改进。
+- Cross-border operators, designers, and store owners
+- Small teams that want local originals plus stable cloud URLs
+- Individual sellers who want less setup and fewer passwords—ready to use immediately
 
-乐捐完全自愿，不影响任何功能使用。
+---
 
-| 微信支付 | 支付宝 |
+## Support the project
+
+The desktop edition will stay free to maintain. If xImgs saves you time, a voluntary tip (buy the developer a coffee) helps keep the project improving.
+
+Tips are entirely optional and do not unlock or restrict any features.
+
+| WeChat Pay | Alipay |
 | :---: | :---: |
-| <img src="resources/ximgs/pay/pay_wechat.jpg" alt="微信支付" width="120" /> | <img src="resources/ximgs/pay/pay_alipay.jpg" alt="支付宝" width="120" /> |
+| <img src="resources/ximgs/pay/pay_wechat.jpg" alt="WeChat Pay" width="120" /> | <img src="resources/ximgs/pay/pay_alipay.jpg" alt="Alipay" width="120" /> |
 
 ---
 
-## 产品路线
+## Roadmap
 
-| 阶段 | 方向 |
+| Stage | Direction |
 |------|------|
-| **单机版（当前 · 个人免费）** | 本地图床、目录同步、图库与 SKU 素材管理 |
-| **网络版 / 企业版（规划中）** | 多端协同、更完整的店铺与素材工作流、增值服务 |
+| **Desktop (current · free for personal use)** | Local image host, folder sync, library and SKU asset management |
+| **Network / enterprise (planned)** | Multi-device collaboration, richer store & asset workflows, paid add-ons |
 
-定制或商务合作：应用内 **设置 → 关于**，或通过 GitHub Issues 留言。
-
----
-
-## 免责声明（摘要）
-
-- xImgs 是**本地客户端**：提供图床对接、同步与素材管理能力，**不提供**云存储、CDN 或流量服务。
-- 桶费用、限流、链接失效、第三方账号安全由您与对应云厂商约定并自行承担。
-- 软件按「现状」提供，不保证适配所有电商平台实时规则；素材版权与本地备份责任在用户。
-- 完整条款见应用内关于页与 [LICENSE](LICENSE)。
+Custom work or business inquiries: in-app **Settings → About**, or leave a note via GitHub Issues.
 
 ---
 
-## 许可证
+## Disclaimer (summary)
 
-见 [LICENSE](LICENSE)。单机版供个人免费使用；源码默认不授予开源再分发权利。云存储等第三方服务条款以其官方为准。
+- xImgs is a **local client**: it connects storage, syncs, and manages assets. It does **not** provide cloud storage, CDN, or bandwidth.
+- Bucket fees, rate limits, broken links, and third-party account security are between you and your cloud provider.
+- Software is provided “as is”; platform rules change. You are responsible for asset copyright and local backups.
+- Full terms: in-app About page and [LICENSE](LICENSE).
+
+---
+
+## License
+
+See [LICENSE](LICENSE). The desktop edition is free for personal use; the source does not by default grant rights to redistribute as open source. Third-party cloud terms apply as published by those vendors.

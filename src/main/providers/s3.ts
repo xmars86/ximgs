@@ -12,6 +12,9 @@ export interface S3UploadConfig {
   forcePathStyle?: boolean
   timeoutMs?: number
   maxAttempts?: number
+  /** R2 rejects default CRC32 checksum headers from recent AWS SDK v3. */
+  requestChecksumCalculation?: 'WHEN_SUPPORTED' | 'WHEN_REQUIRED'
+  responseChecksumValidation?: 'WHEN_SUPPORTED' | 'WHEN_REQUIRED'
 }
 
 export interface PutObjectOptions {
@@ -56,7 +59,13 @@ export function createS3Client(config: S3UploadConfig): S3Client {
     requestHandler: new NodeHttpHandler({
       connectionTimeout: timeoutMs,
       requestTimeout: timeoutMs
-    })
+    }),
+    ...(config.requestChecksumCalculation
+      ? { requestChecksumCalculation: config.requestChecksumCalculation }
+      : {}),
+    ...(config.responseChecksumValidation
+      ? { responseChecksumValidation: config.responseChecksumValidation }
+      : {})
   })
 }
 

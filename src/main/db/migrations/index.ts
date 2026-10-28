@@ -194,5 +194,27 @@ CREATE TABLE IF NOT EXISTS sku_images (
 );
 CREATE INDEX IF NOT EXISTS idx_sku_images_sku ON sku_images(sku_id);
 `
+  },
+  {
+    version: 6,
+    name: '006_sync_runs',
+    sql: `
+CREATE TABLE IF NOT EXISTS sync_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL,
+  scanned INTEGER NOT NULL DEFAULT 0,
+  uploaded INTEGER NOT NULL DEFAULT 0,
+  skipped INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  cancelled INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  watch_folder TEXT,
+  bucket TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sync_runs_finished ON sync_runs(finished_at DESC);
+`
   }
 ]

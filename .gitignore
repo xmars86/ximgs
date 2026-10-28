@@ -62,6 +62,7 @@ ehthumbs.db
 
 # IDE / editor
 .idea/
+.github/
 *.swp
 *.swo
 *~
@@ -80,3 +81,4 @@ docs/
 
 # Deprecated prototype UI (not part of Electron app)
 frontend/
+website/

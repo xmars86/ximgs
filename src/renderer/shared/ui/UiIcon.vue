@@ -23,6 +23,7 @@ const PATHS: Record<string, string> = {
   play: '<path d="M6 3.5 20 12 6 20.5z"/>',
   pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   copy: '<rect width="13" height="13" x="8" y="8" rx="2.5"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   folder:

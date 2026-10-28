@@ -30,6 +30,10 @@ const prefNav = computed(() => [
 const bucketLabel = computed(() => sync.config?.bucket?.trim() || t('shell.noBucket'))
 const providerLabel = computed(() => {
   const p = sync.config?.provider
+  if (p === 'r2') return 'Cloudflare R2'
+  if (p === 'aws') return 'AWS S3'
+  if (p === 'oss') return '阿里云 OSS'
+  if (p === 'cos') return '腾讯云 COS'
   if (p === 'b2') return 'Backblaze B2'
   if (p === 's3') return 'S3'
   return t('shell.noProvider')

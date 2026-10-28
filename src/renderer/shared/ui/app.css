@@ -750,9 +750,9 @@ svg {
 }
 
 .badge.ok {
-  background: var(--ok-bg);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
   color: var(--ok);
-  border-color: var(--ok-line);
+  border-color: color-mix(in srgb, var(--ok) 28%, transparent);
 }
 
 .badge.warn {
@@ -1331,7 +1331,7 @@ table.tbl tr.sel {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 420px;
+  width: 640px;
   background: var(--surface);
   border-left: 1px solid var(--line);
   box-shadow: var(--sh-3);

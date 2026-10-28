@@ -53,6 +53,11 @@ export function handleSync(): Partial<Record<IpcMethod, Handler>> {
     'sync.testConnection': () => sync.testConnection(),
     'sync.getChecklist': () => sync.getChecklist(),
     'sync.retryFailed': () => sync.retryFailed(),
+    'sync.listRuns': (data) => {
+      const obj = asObject(data)
+      const limit = obj.limit == null ? 100 : Number(obj.limit)
+      return sync.listRuns(limit)
+    },
     'sync.uploadSingle': (data) => {
       const obj = asObject(data)
       const filePath = typeof obj.filePath === 'string' ? obj.filePath : ''

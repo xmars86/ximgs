@@ -17,7 +17,8 @@ const { t, locale } = useI18n()
 const gallery = useGalleryStore()
 const sync = useSyncStore()
 const searchDraft = ref('')
-const viewMode = ref<ViewMode>('grid')
+const treeSearchDraft = ref('')
+const viewMode = ref<ViewMode>('tree')
 const sortKey = ref<SortKey>('syncedAt')
 const linkFmt = ref<LinkFmt>('url')
 const selectedId = ref<number | null>(null)
@@ -117,6 +118,10 @@ const explorerItemCount = computed(() => gallery.folders.length + gallery.items.
 
 onMounted(async () => {
   searchDraft.value = gallery.search
+  if (viewMode.value === 'tree') {
+    await gallery.setListingMode('folder')
+    treeExpanded[''] = true
+  }
   await Promise.all([sync.refreshAll().catch(() => undefined), gallery.refresh(), refreshCounts()])
   await ensureTreeChildren('')
 })
@@ -261,14 +266,6 @@ function statusLabel(status: string): string {
   return status
 }
 
-function fileTypeLabel(path: string): string {
-  const name = fileName(path)
-  const i = name.lastIndexOf('.')
-  const ext = i > 0 ? name.slice(i + 1).toUpperCase() : ''
-  if (!ext) return t('library.fileType')
-  return t('library.imageType', { ext })
-}
-
 async function navigateTo(path: string, pushHistory = true): Promise<void> {
   if (pushHistory && gallery.pathPrefix !== path) {
     pathHistory.value = [...pathHistory.value, gallery.pathPrefix]
@@ -378,7 +375,13 @@ function treeIndent(depth: number): string {
 const visibleTreeNodes = computed(() => {
   const out: { folder: SyncFolderDto; depth: number }[] = []
   function walk(parent: string, depth: number): void {
-    const kids = treeChildren[parent] || (parent === '' ? sortedFolders.value : [])
+    let kids = treeChildren[parent] || (parent === '' ? sortedFolders.value : [])
+    if (parent === '') {
+      const query = treeSearchDraft.value.trim().toLocaleLowerCase(locale.value)
+      if (query) {
+        kids = kids.filter((folder) => folder.name.toLocaleLowerCase(locale.value).includes(query))
+      }
+    }
     for (const folder of kids) {
       out.push({ folder, depth })
       if (treeExpanded[folder.path]) walk(folder.path, depth + 1)
@@ -491,54 +494,56 @@ const visibleTreeNodes = computed(() => {
               {{ t('library.uploadOne') }}
             </button>
           </div>
-          <div v-else class="grid-view scroll" style="flex: 1; min-height: 0">
-            <div
-              v-for="item in sortedItems"
-              :key="item.id"
-              class="asset"
-              role="button"
-              tabindex="0"
-              @click="openPreview(item)"
-              @keydown.enter.prevent="openPreview(item)"
-            >
-              <div class="img">
-                <img
-                  v-if="item.publicUrl"
-                  :src="item.publicUrl"
-                  :alt="fileName(item.relativePath)"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                />
-                <div v-else class="img-ph"><UiIcon name="image" :size="28" /></div>
-                <span
-                  class="badge"
-                  :class="{
-                    ok: item.status === 'synced',
-                    err: item.status === 'error',
-                    mute: item.status !== 'synced' && item.status !== 'error'
-                  }"
-                >
-                  {{ statusLabel(item.status) }}
-                </span>
-              </div>
-              <div class="meta">
-                <div class="n-row">
-                  <div class="n" :title="fileName(item.relativePath)">
-                    {{ fileName(item.relativePath) }}
-                  </div>
-                  <button
+          <div v-else class="grid-scroll scroll" style="flex: 1; min-height: 0">
+            <div class="grid-view">
+              <div
+                v-for="item in sortedItems"
+                :key="item.id"
+                class="asset"
+                role="button"
+                tabindex="0"
+                @click="openPreview(item)"
+                @keydown.enter.prevent="openPreview(item)"
+              >
+                <div class="img">
+                  <img
                     v-if="item.publicUrl"
-                    type="button"
-                    class="btn sm ghost copy-btn"
-                    :title="t('library.copy')"
-                    :aria-label="t('library.copy')"
-                    @click.stop="copyText(item.publicUrl)"
+                    :src="item.publicUrl"
+                    :alt="fileName(item.relativePath)"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                  />
+                  <div v-else class="img-ph"><UiIcon name="image" :size="28" /></div>
+                  <span
+                    class="badge"
+                    :class="{
+                      ok: item.status === 'synced',
+                      err: item.status === 'error',
+                      mute: item.status !== 'synced' && item.status !== 'error'
+                    }"
                   >
-                    <UiIcon name="copy" :size="13" />
-                  </button>
+                    {{ statusLabel(item.status) }}
+                  </span>
                 </div>
-                <div class="p">
-                  {{ displayRelPath(item.relativePath) || '—' }} · {{ formatBytes(item.byteSize) }}
+                <div class="meta">
+                  <div class="n-row">
+                    <div class="n" :title="fileName(item.relativePath)">
+                      {{ fileName(item.relativePath) }}
+                    </div>
+                    <button
+                      v-if="item.publicUrl"
+                      type="button"
+                      class="btn sm ghost copy-btn"
+                      :title="t('library.copy')"
+                      :aria-label="t('library.copy')"
+                      @click.stop="copyText(item.publicUrl)"
+                    >
+                      <UiIcon name="copy" :size="13" />
+                    </button>
+                  </div>
+                  <div class="p">
+                    {{ displayRelPath(item.relativePath) || '—' }} · {{ formatBytes(item.byteSize) }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -734,6 +739,15 @@ const visibleTreeNodes = computed(() => {
           <div class="ex-body">
             <aside class="ex-tree scroll">
               <div class="ex-tree-label">{{ t('library.syncFolders') }}</div>
+              <div class="ex-tree-search">
+                <UiIcon name="search" :size="13" />
+                <input
+                  v-model="treeSearchDraft"
+                  class="input"
+                  type="search"
+                  :placeholder="t('library.treeSearchPlaceholder')"
+                />
+              </div>
               <div
                 class="tr"
                 :class="{ on: !gallery.pathPrefix }"
@@ -768,60 +782,57 @@ const visibleTreeNodes = computed(() => {
                 <span class="nmx">{{ node.folder.name }}</span>
                 <span class="ct">{{ node.folder.fileCount }}</span>
               </div>
+              <div
+                v-if="treeSearchDraft.trim() && visibleTreeNodes.length === 0"
+                class="ex-tree-empty"
+              >
+                {{ t('library.treeSearchEmpty') }}
+              </div>
             </aside>
 
             <div class="ex-list">
-              <div class="ex-head">
-                <div>{{ t('library.colName') }}</div>
-                <div>{{ t('library.colModified') }}</div>
-                <div>{{ t('library.colType') }}</div>
-                <div>{{ t('library.colSize') }}</div>
-                <div>{{ t('library.colStatus') }}</div>
-                <div>{{ t('library.colUrl') }}</div>
-              </div>
-              <div class="ex-rows scroll">
+              <div class="ex-gallery scroll">
                 <div v-if="gallery.isEmpty" class="ex-empty">{{ t('library.emptyFolder') }}</div>
                 <div
                   v-for="folder in sortedFolders"
                   :key="`ex-f-${folder.path}`"
-                  class="ex-row"
+                  class="ex-folder-card"
+                  role="button"
+                  tabindex="0"
                   @dblclick="openFolderRow(folder.path)"
                   @click="selectedId = null"
+                  @keydown.enter.prevent="openFolderRow(folder.path)"
                 >
-                  <div class="nm">
-                    <UiIcon name="folder" :size="16" class="fi" />
-                    <span>{{ folder.name }}</span>
+                  <div class="ex-folder-icon">
+                    <UiIcon name="folder" :size="34" />
                   </div>
-                  <div class="dim">—</div>
-                  <div class="dim">{{ t('library.folder') }}</div>
-                  <div class="dim">—</div>
-                  <div class="dim">—</div>
-                  <div class="dim">—</div>
+                  <div class="ex-card-name" :title="folder.name">{{ folder.name }}</div>
+                  <div class="ex-card-sub">
+                    {{ folder.fileCount }} {{ t('library.itemsUnit') }}
+                  </div>
                 </div>
                 <div
                   v-for="item in sortedItems"
                   :key="`ex-${item.id}`"
-                  class="ex-row"
+                  class="ex-image-card"
                   :class="{ on: selectedId === item.id }"
+                  role="button"
+                  tabindex="0"
                   @click="selectRow(item)"
                   @dblclick="openPreview(item)"
+                  @keydown.enter.prevent="openPreview(item)"
                 >
-                  <div class="nm">
+                  <div class="ex-image">
                     <img
                       v-if="item.publicUrl"
-                      class="thumb"
                       :src="item.publicUrl"
-                      alt=""
+                      :alt="fileName(item.relativePath)"
                       loading="lazy"
                       referrerpolicy="no-referrer"
                     />
-                    <UiIcon v-else name="image" :size="16" class="fi" style="color: var(--text-3)" />
-                    <span>{{ fileName(item.relativePath) }}</span>
-                  </div>
-                  <div class="dim">{{ formatExplorerDate(item.syncedAt || item.updatedAt) }}</div>
-                  <div class="dim">{{ fileTypeLabel(item.relativePath) }}</div>
-                  <div class="dim">{{ formatBytes(item.byteSize) }}</div>
-                  <div>
+                    <div v-else class="ex-image-placeholder">
+                      <UiIcon name="image" :size="28" />
+                    </div>
                     <span
                       class="badge"
                       :class="{
@@ -833,16 +844,26 @@ const visibleTreeNodes = computed(() => {
                       {{ statusLabel(item.status) }}
                     </span>
                   </div>
-                  <div class="lnk">
-                    <button
-                      v-if="item.publicUrl"
-                      type="button"
-                      class="btn sm ghost"
-                      @click.stop="copyText(item.publicUrl)"
-                    >
-                      <UiIcon name="copy" :size="13" />
-                    </button>
-                    <span v-else class="dim">—</span>
+                  <div class="ex-card-meta">
+                    <div class="ex-card-name-row">
+                      <div class="ex-card-name" :title="fileName(item.relativePath)">
+                        {{ fileName(item.relativePath) }}
+                      </div>
+                      <button
+                        v-if="item.publicUrl"
+                        type="button"
+                        class="btn sm ghost ex-copy"
+                        :title="t('library.copy')"
+                        :aria-label="t('library.copy')"
+                        @click.stop="copyText(item.publicUrl)"
+                      >
+                        <UiIcon name="copy" :size="13" />
+                      </button>
+                    </div>
+                    <div class="ex-card-sub">
+                      {{ formatExplorerDate(item.syncedAt || item.updatedAt) }} ·
+                      {{ formatBytes(item.byteSize) }}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -973,14 +994,6 @@ const visibleTreeNodes = computed(() => {
 </template>
 
 <style scoped>
-.img-ph {
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  color: var(--text-3);
-}
-
 .thumb.ph {
   display: grid;
   place-items: center;

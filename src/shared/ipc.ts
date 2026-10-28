@@ -38,6 +38,7 @@ import type {
   SyncFileListResult,
   SyncFileQuery,
   SyncFileStatusCounts,
+  SyncRunListResult,
   SyncRunResult,
   SyncSetupChecklist,
   SyncStatusDto
@@ -120,6 +121,7 @@ export type IpcMethod =
   | 'sync.testConnection'
   | 'sync.getChecklist'
   | 'sync.retryFailed'
+  | 'sync.listRuns'
   | 'sync.uploadSingle'
   | 'sync.uploadPaths'
   | 'sync.uploadClipboard'
@@ -204,6 +206,7 @@ export type IpcMethodMap = {
   'sync.testConnection': { req: void; res: { ok: true; provider: string } }
   'sync.getChecklist': { req: void; res: SyncSetupChecklist }
   'sync.retryFailed': { req: void; res: SyncRunResult }
+  'sync.listRuns': { req: { limit?: number } | void; res: SyncRunListResult }
   'sync.uploadSingle': {
     req: { filePath: string; folderPath?: string }
     res: SingleUploadResult

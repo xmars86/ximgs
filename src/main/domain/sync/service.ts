@@ -20,6 +20,7 @@ import {
   listSyncFiles,
   sumSyncedBytes
 } from '@main/db/repos/syncFiles'
+import { listSyncRuns } from '@main/db/repos/syncRuns'
 import { isSyncRunInProgress } from './runner'
 import { buildPublicUrl } from './objectKey'
 import {
@@ -33,6 +34,14 @@ import {
   resolveB2Config,
   testB2Connection
 } from '@main/providers/backblaze'
+import { deriveR2Endpoint } from '@shared/r2'
+import { resolveR2Config, testR2Connection } from '@main/providers/r2'
+import { resolveRegionalConfig, testRegionalConnection } from '@main/providers/regional'
+import {
+  deriveRegionalEndpoint,
+  deriveRegionalPublicBase,
+  isRegionalProvider
+} from '@shared/regional'
 import { createS3Client } from '@main/providers/s3'
 import { clearSyncSecret, hasSyncSecret, loadSyncSecret, saveSyncSecret } from './secrets'
 import {
@@ -82,7 +91,14 @@ export function setConfig(update: SyncConfigUpdate): SyncConfigPublic {
 
   let endpoint = update.endpoint
   let region = update.region
+  let publicBaseUrl = update.publicBaseUrl
   const provider = update.provider ?? getSyncSettings().provider
+  const touchesStorage =
+    update.provider !== undefined ||
+    update.endpoint !== undefined ||
+    update.region !== undefined ||
+    update.bucket !== undefined ||
+    update.publicBaseUrl !== undefined
 
   if (provider === 'b2') {
     const nextRegion = (region ?? getSyncSettings().region).trim()
@@ -94,6 +110,24 @@ export function setConfig(update: SyncConfigUpdate): SyncConfigPublic {
     }
   }
 
+  if (provider === 'r2') {
+    const nextEndpoint = (endpoint ?? getSyncSettings().endpoint).trim()
+    endpoint = deriveR2Endpoint('', nextEndpoint)
+    const nextRegion = (region ?? getSyncSettings().region).trim()
+    region = nextRegion || 'auto'
+  }
+
+  if (touchesStorage && isRegionalProvider(provider)) {
+    const current = getSyncSettings()
+    const nextRegion = (region ?? current.region).trim()
+    const nextEndpoint = (endpoint ?? current.endpoint).trim()
+    const nextBucket = (update.bucket ?? current.bucket).trim()
+    const nextPublic = (publicBaseUrl ?? current.publicBaseUrl).trim()
+    region = nextRegion
+    endpoint = deriveRegionalEndpoint(provider, nextRegion, nextEndpoint)
+    publicBaseUrl = deriveRegionalPublicBase(provider, nextBucket, nextRegion, nextPublic)
+  }
+
   updateSyncSettings({
     watchFolder: update.watchFolder,
     intervalMinutes: update.intervalMinutes,
@@ -103,7 +137,7 @@ export function setConfig(update: SyncConfigUpdate): SyncConfigPublic {
     endpoint,
     region,
     bucket: update.bucket,
-    publicBaseUrl: update.publicBaseUrl,
+    publicBaseUrl,
     accessKeyId: update.accessKeyId,
     sseMode: update.sseMode
   })
@@ -175,6 +209,10 @@ export async function runNow() {
 
 export async function retryFailed() {
   return retryFailedTracked()
+}
+
+export function listRuns(limit = 100) {
+  return { items: listSyncRuns(limit) }
 }
 
 function withEncodedPublicUrls<T extends { items: { objectKey: string | null; publicUrl: string | null }[] }>(
@@ -330,6 +368,34 @@ export async function testConnection(): Promise<{ ok: true; provider: string }> 
   const secret = loadSyncSecret()
   if (!secret) {
     throw new AppError('S3_SECRET_MISSING', '缺少 Application Key / Secret（请填写并保存）')
+  }
+
+  if (isRegionalProvider(s.provider)) {
+    const regional = resolveRegionalConfig(s.provider, {
+      accessKeyId: s.accessKeyId,
+      secretAccessKey: secret,
+      bucketName: s.bucket,
+      region: s.region,
+      endpoint: s.endpoint,
+      publicBaseUrl: s.publicBaseUrl,
+      keyPrefix: s.objectPrefix
+    })
+    await testRegionalConnection(regional)
+    return { ok: true as const, provider: s.provider }
+  }
+
+  if (s.provider === 'r2') {
+    const r2 = resolveR2Config({
+      accessKeyId: s.accessKeyId,
+      secretAccessKey: secret,
+      bucketName: s.bucket,
+      region: s.region,
+      endpoint: s.endpoint,
+      publicBaseUrl: s.publicBaseUrl,
+      keyPrefix: s.objectPrefix
+    })
+    await testR2Connection(r2)
+    return { ok: true as const, provider: 'r2' }
   }
 
   if (s.provider === 's3') {

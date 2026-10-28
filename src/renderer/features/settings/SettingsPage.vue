@@ -3,6 +3,12 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { AUTHOR_CONTACT_EMAIL } from '@shared/contact'
+import { deriveR2Endpoint, parseR2AccountId } from '@shared/r2'
+import {
+  deriveRegionalEndpoint,
+  deriveRegionalPublicBase,
+  isRegionalProvider
+} from '@shared/regional'
 import type { SyncProviderId } from '@shared/sync'
 import { useBridgeStore } from '../../shared/bridge/useBridgeStore'
 import { useLocale } from '../../shared/i18n/useLocale'
@@ -37,6 +43,7 @@ const form = reactive({
   autoStart: false,
   objectPrefix: '',
   provider: 'b2' as SyncProviderId,
+  accountId: '',
   endpoint: '',
   region: '',
   bucket: '',
@@ -45,10 +52,55 @@ const form = reactive({
   sseMode: '' as '' | 'AES256'
 })
 
-const derivedEndpoint = computed(() => {
+const derivedB2Endpoint = computed(() => {
   if (form.provider !== 'b2' || !form.region.trim()) return ''
   return `https://s3.${form.region.trim()}.backblazeb2.com`
 })
+
+const derivedR2Endpoint = computed(() => {
+  if (form.provider !== 'r2') return ''
+  return deriveR2Endpoint(form.accountId, '')
+})
+
+const derivedEndpoint = computed(() => {
+  if (form.provider === 'b2') return derivedB2Endpoint.value
+  if (form.provider === 'r2') return derivedR2Endpoint.value
+  if (isRegionalProvider(form.provider)) {
+    return deriveRegionalEndpoint(form.provider, form.region, '')
+  }
+  return ''
+})
+
+const derivedPublic = computed(() => {
+  if (!isRegionalProvider(form.provider)) return ''
+  return deriveRegionalPublicBase(form.provider, form.bucket, form.region, '')
+})
+
+const regionPlaceholder = computed(() => {
+  if (form.provider === 'b2') return 'eu-central-003'
+  if (form.provider === 'aws') return 'ap-southeast-1'
+  if (form.provider === 'oss') return 'cn-hangzhou'
+  if (form.provider === 'cos') return 'ap-guangzhou'
+  return 'auto'
+})
+
+const endpointPlaceholder = computed(() => {
+  if (derivedEndpoint.value) return derivedEndpoint.value
+  if (form.provider === 'b2') return 'https://s3.<region>.backblazeb2.com'
+  if (form.provider === 'r2') return 'https://<account-id>.r2.cloudflarestorage.com'
+  if (form.provider === 'aws') return 'https://s3.<region>.amazonaws.com'
+  if (form.provider === 'oss') return 'https://oss-<region>.aliyuncs.com'
+  if (form.provider === 'cos') return 'https://cos.<region>.myqcloud.com'
+  return 'https://s3.amazonaws.com'
+})
+
+const PROVIDER_HOST: Partial<Record<SyncProviderId, string>> = {
+  r2: 'r2.cloudflarestorage.com',
+  b2: 'backblazeb2.com',
+  aws: 'amazonaws.com',
+  oss: 'aliyuncs.com',
+  cos: 'myqcloud.com'
+}
 
 const providers = computed(() => [
   {
@@ -58,10 +110,34 @@ const providers = computed(() => [
     icon: 'database' as const
   },
   {
+    id: 'r2' as const,
+    name: 'Cloudflare R2',
+    desc: t('settings.provR2'),
+    icon: 'globe' as const
+  },
+  {
+    id: 'aws' as const,
+    name: 'AWS S3',
+    desc: t('settings.provAws'),
+    icon: 'cloud' as const
+  },
+  {
+    id: 'oss' as const,
+    name: '阿里云 OSS',
+    desc: t('settings.provOss'),
+    icon: 'folder' as const
+  },
+  {
+    id: 'cos' as const,
+    name: '腾讯云 COS',
+    desc: t('settings.provCos'),
+    icon: 'image' as const
+  },
+  {
     id: 's3' as const,
     name: t('settings.provS3Name'),
     desc: t('settings.provS3'),
-    icon: 'cloud' as const
+    icon: 'cloudCheck' as const
   }
 ])
 
@@ -99,6 +175,7 @@ async function hydrate(): Promise<void> {
   form.autoStart = c.autoStart
   form.objectPrefix = c.objectPrefix
   form.provider = c.provider || 'b2'
+  form.accountId = c.provider === 'r2' ? parseR2AccountId(c.endpoint) : ''
   form.endpoint = c.endpoint
   form.region = c.region
   form.bucket = c.bucket
@@ -111,18 +188,41 @@ async function hydrate(): Promise<void> {
 }
 
 function selectProvider(id: SyncProviderId): void {
+  const previous = form.provider
   form.provider = id
+  if (previous === id) return
+  if (id === 'r2') form.region = 'auto'
+  const marker = PROVIDER_HOST[id]
+  if (id !== 's3' && form.endpoint && marker && !form.endpoint.includes(marker)) {
+    form.endpoint = ''
+  }
+}
+
+function resolvedEndpoint(): string {
+  if (form.provider === 'b2') return form.endpoint.trim() || derivedB2Endpoint.value
+  if (form.provider === 'r2') return deriveR2Endpoint(form.accountId, form.endpoint)
+  if (isRegionalProvider(form.provider)) {
+    return deriveRegionalEndpoint(form.provider, form.region, form.endpoint)
+  }
+  return form.endpoint.trim()
+}
+
+function resolvedPublicBase(): string {
+  if (isRegionalProvider(form.provider)) {
+    return deriveRegionalPublicBase(form.provider, form.bucket, form.region, form.publicBaseUrl)
+  }
+  return form.publicBaseUrl.trim()
 }
 
 async function saveStorage(): Promise<void> {
   await sync.saveConfig({
     provider: form.provider,
-    endpoint: form.endpoint.trim() || (form.provider === 'b2' ? derivedEndpoint.value : ''),
-    region: form.region,
+    endpoint: resolvedEndpoint(),
+    region: form.provider === 'r2' ? form.region.trim() || 'auto' : form.region,
     bucket: form.bucket,
-    publicBaseUrl: form.publicBaseUrl,
+    publicBaseUrl: resolvedPublicBase(),
     accessKeyId: form.accessKeyId,
-    sseMode: form.sseMode,
+    sseMode: form.provider === 'b2' ? form.sseMode : '',
     secretAccessKey: sync.draftSecret || undefined,
     objectPrefix: form.objectPrefix
   })
@@ -304,13 +404,30 @@ async function copyAuthorEmail(): Promise<void> {
 
               <div class="hr" />
 
-              <div class="form-row">
+              <div v-if="form.provider === 'r2'" class="form-row">
+                <div class="lbl">
+                  <b>Account ID</b>
+                  <span>{{ t('settings.accountIdHint') }}</span>
+                </div>
+                <div>
+                  <input
+                    v-model="form.accountId"
+                    class="input mono"
+                    style="max-width: 420px"
+                    placeholder="a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <div class="tip" style="margin-top: 5px">{{ t('settings.accountIdTip') }}</div>
+                </div>
+              </div>
+              <div v-if="form.provider !== 'r2'" class="form-row">
                 <div class="lbl"><b>Region</b><span>{{ t('settings.regionHint') }}</span></div>
                 <input
                   v-model="form.region"
                   class="input"
                   style="max-width: 280px"
-                  :placeholder="form.provider === 'b2' ? 'eu-central-003' : 'auto'"
+                  :placeholder="regionPlaceholder"
                 />
               </div>
               <div class="form-row">
@@ -319,31 +436,70 @@ async function copyAuthorEmail(): Promise<void> {
                   <input
                     v-model="form.endpoint"
                     class="input mono"
-                    :placeholder="
-                      form.provider === 'b2'
-                        ? derivedEndpoint || 'https://s3.<region>.backblazeb2.com'
-                        : 'https://s3.amazonaws.com'
-                    "
+                    :placeholder="endpointPlaceholder"
                   />
                   <div
-                    v-if="form.provider === 'b2' && derivedEndpoint && !form.endpoint.trim()"
+                    v-if="derivedEndpoint && !form.endpoint.trim()"
                     class="tip"
                     style="margin-top: 5px"
                   >
                     {{ t('sync.endpointHint', { endpoint: derivedEndpoint }) }}
                   </div>
+                  <div v-else-if="form.provider === 'r2'" class="tip" style="margin-top: 5px">
+                    {{ t('settings.r2EndpointTip') }}
+                  </div>
+                  <div v-if="form.provider === 'oss'" class="tip" style="margin-top: 5px">
+                    {{ t('settings.ossEndpointTip') }}
+                  </div>
                 </div>
               </div>
               <div class="form-row">
                 <div class="lbl"><b>Bucket</b><span>{{ t('settings.bucketHint') }}</span></div>
-                <input v-model="form.bucket" class="input mono" style="max-width: 280px" />
+                <div>
+                  <input
+                    v-model="form.bucket"
+                    class="input mono"
+                    style="max-width: 360px"
+                    :placeholder="form.provider === 'cos' ? 'images-1250000000' : ''"
+                  />
+                  <div v-if="form.provider === 'cos'" class="tip" style="margin-top: 5px">
+                    {{ t('settings.cosBucketTip') }}
+                  </div>
+                </div>
               </div>
               <div class="form-row">
                 <div class="lbl">
                   <b>{{ t('sync.publicBase') }}</b>
                   <span>{{ t('settings.publicHint') }}</span>
                 </div>
-                <input v-model="form.publicBaseUrl" class="input mono" />
+                <div>
+                  <input
+                    v-model="form.publicBaseUrl"
+                    class="input mono"
+                    :placeholder="
+                      form.provider === 'r2'
+                        ? 'https://pub-xxxx.r2.dev'
+                        : derivedPublic || ''
+                    "
+                  />
+                  <div v-if="form.provider === 'r2'" class="tip" style="margin-top: 5px">
+                    {{ t('settings.r2PublicTip') }}
+                  </div>
+                  <div
+                    v-else-if="derivedPublic && !form.publicBaseUrl.trim()"
+                    class="tip"
+                    style="margin-top: 5px"
+                  >
+                    {{ t('sync.endpointHint', { endpoint: derivedPublic }) }}
+                  </div>
+                  <div
+                    v-else-if="form.provider === 'aws' || form.provider === 'oss' || form.provider === 'cos'"
+                    class="tip"
+                    style="margin-top: 5px"
+                  >
+                    {{ t('settings.regionalPublicTip') }}
+                  </div>
+                </div>
               </div>
               <div class="form-row">
                 <div class="lbl">
@@ -612,27 +768,29 @@ async function copyAuthorEmail(): Promise<void> {
               </div>
               <div class="hr" />
               <table style="width: 100%; border-collapse: collapse; font-size: 12px">
-                <tr>
-                  <td style="width: 120px; padding: 7px 0; color: var(--text-3)">
-                    {{ t('settings.runtime') }}
-                  </td>
-                  <td style="padding: 7px 0">
-                    <template v-if="bridge.appInfo">
-                      Electron {{ bridge.appInfo.electron }} · {{ bridge.appInfo.platform }}
-                    </template>
-                    <template v-else>—</template>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 7px 0; color: var(--text-3)">{{ t('settings.userData') }}</td>
-                  <td style="padding: 7px 0" class="mono">
-                    {{ bridge.paths?.userData || '—' }}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 7px 0; color: var(--text-3)">{{ t('settings.scope') }}</td>
-                  <td style="padding: 7px 0">{{ t('settings.scopeValue') }}</td>
-                </tr>
+                <tbody>
+                  <tr>
+                    <td style="width: 120px; padding: 7px 0; color: var(--text-3)">
+                      {{ t('settings.runtime') }}
+                    </td>
+                    <td style="padding: 7px 0">
+                      <template v-if="bridge.appInfo">
+                        Electron {{ bridge.appInfo.electron }} · {{ bridge.appInfo.platform }}
+                      </template>
+                      <template v-else>—</template>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 7px 0; color: var(--text-3)">{{ t('settings.userData') }}</td>
+                    <td style="padding: 7px 0" class="mono">
+                      {{ bridge.paths?.userData || '—' }}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 7px 0; color: var(--text-3)">{{ t('settings.scope') }}</td>
+                    <td style="padding: 7px 0">{{ t('settings.scopeValue') }}</td>
+                  </tr>
+                </tbody>
               </table>
               <div class="hr" />
               <div class="disclaimer">

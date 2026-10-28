@@ -6,6 +6,9 @@ import {
   resolveB2Config,
   type B2ResolvedConfig
 } from '@main/providers/backblaze'
+import { createR2S3Client, resolveR2Config } from '@main/providers/r2'
+import { createRegionalClient, resolveRegionalConfig } from '@main/providers/regional'
+import { isRegionalProvider } from '@shared/regional'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { assertReadyToTestConnection } from './validate'
 
@@ -17,50 +20,88 @@ export interface UploadContext {
   publicBaseUrl: string
 }
 
-/** Shared S3/B2 client context for folder sync and single uploads. */
+/** Shared client context for folder sync and single uploads. */
 export function createUploadContext(secret: string): UploadContext {
   const settings = getSyncSettings()
   assertReadyToTestConnection(settings)
 
-  const useB2 = settings.provider !== 's3'
-  const b2 = useB2
-    ? resolveB2Config({
-        keyId: settings.accessKeyId,
-        applicationKey: secret,
-        bucketName: settings.bucket,
-        region: settings.region,
-        endpoint: settings.endpoint,
-        publicBaseUrl: settings.publicBaseUrl,
-        keyPrefix: settings.objectPrefix,
-        sseMode: settings.sseMode
-      })
-    : null
-
-  if (!useB2) {
-    if (!settings.bucket.trim() || !settings.accessKeyId.trim() || !settings.endpoint.trim()) {
-      throw new AppError(
-        'S3_CONFIG_INCOMPLETE',
-        '配置未完成，无法上传：\n- 请填写 Endpoint、Bucket、Access Key ID 与 Secret'
-      )
+  if (settings.provider === 'b2') {
+    const b2 = resolveB2Config({
+      keyId: settings.accessKeyId,
+      applicationKey: secret,
+      bucketName: settings.bucket,
+      region: settings.region,
+      endpoint: settings.endpoint,
+      publicBaseUrl: settings.publicBaseUrl,
+      keyPrefix: settings.objectPrefix,
+      sseMode: settings.sseMode
+    })
+    return {
+      client: createB2S3Client(b2),
+      b2,
+      prefix: b2.keyPrefix,
+      bucket: b2.bucketName,
+      publicBaseUrl: b2.publicBaseUrl
     }
   }
 
-  const client = b2
-    ? createB2S3Client(b2)
-    : createS3Client({
-        endpoint: settings.endpoint,
-        region: settings.region || 'auto',
-        bucket: settings.bucket,
-        accessKeyId: settings.accessKeyId,
-        secretAccessKey: secret,
-        forcePathStyle: Boolean(settings.endpoint.trim())
-      })
+  if (isRegionalProvider(settings.provider)) {
+    const regional = resolveRegionalConfig(settings.provider, {
+      accessKeyId: settings.accessKeyId,
+      secretAccessKey: secret,
+      bucketName: settings.bucket,
+      region: settings.region,
+      endpoint: settings.endpoint,
+      publicBaseUrl: settings.publicBaseUrl,
+      keyPrefix: settings.objectPrefix
+    })
+    return {
+      client: createRegionalClient(regional),
+      b2: null,
+      prefix: regional.keyPrefix,
+      bucket: regional.bucketName,
+      publicBaseUrl: regional.publicBaseUrl
+    }
+  }
+
+  if (settings.provider === 'r2') {
+    const r2 = resolveR2Config({
+      accessKeyId: settings.accessKeyId,
+      secretAccessKey: secret,
+      bucketName: settings.bucket,
+      region: settings.region,
+      endpoint: settings.endpoint,
+      publicBaseUrl: settings.publicBaseUrl,
+      keyPrefix: settings.objectPrefix
+    })
+    return {
+      client: createR2S3Client(r2),
+      b2: null,
+      prefix: r2.keyPrefix,
+      bucket: r2.bucketName,
+      publicBaseUrl: r2.publicBaseUrl
+    }
+  }
+
+  if (!settings.bucket.trim() || !settings.accessKeyId.trim() || !settings.endpoint.trim()) {
+    throw new AppError(
+      'S3_CONFIG_INCOMPLETE',
+      '配置未完成，无法上传：\n- 请填写 Endpoint、Bucket、Access Key ID 与 Secret'
+    )
+  }
 
   return {
-    client,
-    b2,
-    prefix: b2 ? b2.keyPrefix : settings.objectPrefix,
-    bucket: b2 ? b2.bucketName : settings.bucket,
-    publicBaseUrl: b2 ? b2.publicBaseUrl : settings.publicBaseUrl
+    client: createS3Client({
+      endpoint: settings.endpoint,
+      region: settings.region || 'auto',
+      bucket: settings.bucket,
+      accessKeyId: settings.accessKeyId,
+      secretAccessKey: secret,
+      forcePathStyle: Boolean(settings.endpoint.trim())
+    }),
+    b2: null,
+    prefix: settings.objectPrefix,
+    bucket: settings.bucket,
+    publicBaseUrl: settings.publicBaseUrl
   }
 }

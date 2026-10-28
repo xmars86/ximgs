@@ -152,8 +152,8 @@ export const useSkuStore = defineStore('sku', () => {
     errorMessage.value = null
     try {
       detail.value = await bridgeInvoke('sku.bindImages', {
-        skuId: detail.value.sku.id,
-        syncFileIds: pickerSelected.value
+        skuId: Number(detail.value.sku.id),
+        syncFileIds: pickerSelected.value.map(Number)
       })
       pickerSelected.value = []
       await refresh()

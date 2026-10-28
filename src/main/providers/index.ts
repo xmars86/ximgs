@@ -9,3 +9,9 @@ export {
   resolveB2Config,
   testB2Connection
 } from './backblaze'
+export { createR2S3Client, putR2ObjectFile, resolveR2Config, testR2Connection } from './r2'
+export {
+  createRegionalClient,
+  resolveRegionalConfig,
+  testRegionalConnection
+} from './regional'

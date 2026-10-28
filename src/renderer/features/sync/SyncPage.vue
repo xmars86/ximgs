@@ -52,6 +52,10 @@ const progressPercent = computed(() => {
 
 const providerLabel = computed(() => {
   const p = sync.config?.provider as SyncProviderId | undefined
+  if (p === 'r2') return t('sync.providerR2')
+  if (p === 'aws') return t('sync.providerAws')
+  if (p === 'oss') return t('sync.providerOss')
+  if (p === 'cos') return t('sync.providerCos')
   if (p === 'b2') return 'Backblaze B2'
   if (p === 's3') return t('sync.providerS3')
   return t('sync.noBucketYet')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SkuDto } from '@shared/sku'
 import { SKU_IMAGE_LIMIT, SKU_PAGE_SIZE } from '@shared/sku'
@@ -24,6 +24,7 @@ const page = ref(1)
 const isEditing = computed(() => editingId.value != null)
 const detail = computed(() => store.detail)
 const showPicker = ref(false)
+const pickerEl = ref<HTMLElement | null>(null)
 
 const subtitleText = computed(() =>
   t('sku.subtitleStats', { n: store.count, limit: store.limit })
@@ -173,6 +174,14 @@ async function confirmDelete(row: SkuDto): Promise<void> {
 async function openDetail(row: SkuDto): Promise<void> {
   showPicker.value = false
   await store.openDetail(row.id)
+  showPicker.value = !store.detail?.images.length
+}
+
+async function togglePicker(): Promise<void> {
+  showPicker.value = !showPicker.value
+  if (!showPicker.value) return
+  await nextTick()
+  pickerEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function closeDetail(): void {
@@ -374,131 +383,135 @@ function onDialogKeydown(event: KeyboardEvent): void {
         </div>
 
         <div class="drawer-bd scroll">
-          <div class="meta-block">
-            <div class="meta-row">
+          <div class="meta-line">
+            <span class="meta-chip">
               <span class="k">{{ t('sku.colNote') }}</span>
-              <span class="v">{{ detail.sku.note || '—' }}</span>
-            </div>
-            <div class="meta-row">
+              <span class="v" :title="detail.sku.note || ''">{{ detail.sku.note || '—' }}</span>
+            </span>
+            <span class="meta-chip">
               <span class="k">{{ t('sku.colUpdated') }}</span>
               <span class="v">{{ formatTime(detail.sku.updatedAt) }}</span>
-            </div>
-            <div class="meta-row">
-              <span class="k">{{ t('sku.colImages') }}</span>
-              <span class="v">{{ detail.images.length }} / {{ SKU_IMAGE_LIMIT }}</span>
-            </div>
+            </span>
           </div>
 
           <div class="sec-hd">
             <h4>{{ t('sku.imagesTitle') }}</h4>
+            <span class="chipx">{{ detail.images.length }} / {{ SKU_IMAGE_LIMIT }}</span>
             <div class="spacer" />
-            <button
-              type="button"
-              class="btn sm"
-              :disabled="store.isBusy || detail.images.length >= SKU_IMAGE_LIMIT"
-              @click="showPicker = !showPicker"
-            >
-              <UiIcon name="plus" :size="13" />
-              {{ t('sku.addImages') }}
-            </button>
+            <span v-if="detail.images.length" class="sec-hint">{{ t('sku.hoverHint') }}</span>
           </div>
 
-          <div v-if="!detail.images.length" class="img-empty">
-            {{ t('sku.noImages') }}
-          </div>
-          <div v-else class="img-grid">
+          <div class="img-grid">
             <div
               v-for="img in detail.images"
               :key="img.id"
-              class="img-card"
+              class="img-tile"
               :class="{ cover: img.isCover }"
+              :title="img.relativePath"
             >
               <img :src="img.publicUrl" :alt="fileName(img.relativePath)" loading="lazy" />
               <span v-if="img.isCover" class="cover-badge">{{ t('sku.cover') }}</span>
-              <div class="img-actions">
+              <div class="tile-actions">
                 <button
                   v-if="!img.isCover"
                   type="button"
-                  class="btn sm"
+                  class="tile-btn"
                   :disabled="store.isBusy"
+                  :title="t('sku.setCover')"
                   @click="store.setCover(img.id)"
                 >
-                  {{ t('sku.setCover') }}
+                  <UiIcon name="star" :size="13" />
                 </button>
                 <button
                   type="button"
-                  class="btn sm ghost"
+                  class="tile-btn danger"
                   :disabled="store.isBusy"
+                  :title="t('sku.unbind')"
                   @click="confirmUnbind(img.id, img.relativePath)"
                 >
-                  {{ t('sku.unbind') }}
+                  <UiIcon name="x" :size="13" />
                 </button>
               </div>
-              <div class="img-name" :title="img.relativePath">{{ fileName(img.relativePath) }}</div>
             </div>
+            <button
+              v-if="detail.images.length < SKU_IMAGE_LIMIT"
+              type="button"
+              class="img-tile add-tile"
+              :class="{ on: showPicker }"
+              :disabled="store.isBusy"
+              @click="togglePicker"
+            >
+              <UiIcon name="plus" :size="18" />
+              <span>{{ t('sku.addImages') }}</span>
+            </button>
           </div>
+          <p v-if="!detail.images.length" class="sec-hint" style="margin: 8px 0 0">
+            {{ t('sku.noImages') }}
+          </p>
 
-          <div v-if="showPicker" class="picker">
-            <div class="sec-hd" style="margin-top: 18px">
+          <section v-if="showPicker" ref="pickerEl" class="picker">
+            <div class="sec-hd">
               <h4>{{ t('sku.pickerTitle') }}</h4>
               <div class="spacer" />
-              <span class="chipx">{{ store.pickerSelected.length }}</span>
-            </div>
-            <div class="picker-search">
-              <UiIcon name="search" :size="13" />
-              <input
-                v-model="store.pickerSearch"
-                class="input"
-                type="search"
-                :placeholder="t('sku.pickerSearch')"
-              />
+              <div class="picker-search">
+                <UiIcon name="search" :size="13" />
+                <input
+                  v-model="store.pickerSearch"
+                  class="input"
+                  type="search"
+                  :placeholder="t('sku.pickerSearch')"
+                />
+              </div>
             </div>
             <div v-if="store.pickerLoading" class="img-empty">{{ t('sku.pickerLoading') }}</div>
             <div v-else-if="!pickerCandidates.length" class="img-empty">
               {{ t('sku.pickerEmpty') }}
             </div>
-            <div v-else class="picker-list scroll">
+            <div v-else class="img-grid picker-grid">
               <button
                 v-for="file in pickerCandidates"
                 :key="file.id"
                 type="button"
-                class="picker-item"
+                class="img-tile pick-tile"
                 :class="{ on: store.pickerSelected.includes(file.id) }"
+                :title="file.relativePath"
                 @click="store.togglePicker(file.id)"
               >
                 <img
                   v-if="file.publicUrl"
                   :src="file.publicUrl"
                   :alt="fileName(file.relativePath)"
-                  class="picker-thumb"
+                  loading="lazy"
                 />
-                <div v-else class="picker-thumb ph"><UiIcon name="image" :size="12" /></div>
-                <div class="picker-meta">
-                  <div class="nm">{{ fileName(file.relativePath) }}</div>
-                  <div class="path">{{ file.relativePath }}</div>
-                </div>
-                <UiIcon
-                  v-if="store.pickerSelected.includes(file.id)"
-                  name="check"
-                  :size="14"
-                  class="chk"
-                />
+                <span class="pick-check"><UiIcon name="check" :size="11" /></span>
+                <span class="pick-name">{{ fileName(file.relativePath) }}</span>
               </button>
             </div>
-            <div class="picker-ft">
-              <button type="button" class="btn sm ghost" @click="showPicker = false">
-                {{ t('sku.cancel') }}
-              </button>
-              <button
-                type="button"
-                class="btn sm primary"
-                :disabled="store.isBusy || !store.pickerSelected.length"
-                @click="store.bindSelected()"
-              >
-                {{ t('sku.bindSelected', { n: store.pickerSelected.length }) }}
-              </button>
-            </div>
-          </div>
+          </section>
+        </div>
+
+        <div v-if="showPicker" class="drawer-ft picker-bar">
+          <span class="sel-count">{{ t('sku.selectedN', { n: store.pickerSelected.length }) }}</span>
+          <button
+            v-if="store.pickerSelected.length"
+            type="button"
+            class="btn sm ghost"
+            @click="store.pickerSelected = []"
+          >
+            {{ t('sku.clearSelection') }}
+          </button>
+          <div class="spacer" />
+          <button type="button" class="btn sm ghost" @click="showPicker = false">
+            {{ t('sku.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="btn sm primary"
+            :disabled="store.isBusy || !store.pickerSelected.length"
+            @click="store.bindSelected()"
+          >
+            {{ t('sku.bindSelected', { n: store.pickerSelected.length }) }}
+          </button>
         </div>
       </template>
     </aside>
@@ -654,7 +667,7 @@ function onDialogKeydown(event: KeyboardEvent): void {
 }
 
 .sku-drawer {
-  width: min(480px, 100vw);
+  width: min(720px, 92vw);
 }
 
 .hd-text {
@@ -673,30 +686,31 @@ function onDialogKeydown(event: KeyboardEvent): void {
   white-space: nowrap;
 }
 
-.meta-block {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
+.meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 14px;
+  font-size: 12px;
 }
 
-.meta-row {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 8px;
-  font-size: 12.5px;
+.meta-chip {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.meta-row .k {
+.meta-chip .k {
   color: var(--text-3);
+  flex: none;
 }
 
-.meta-row .v {
+.meta-chip .v {
   color: var(--text);
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sec-hd {
@@ -712,6 +726,11 @@ function onDialogKeydown(event: KeyboardEvent): void {
   font-weight: 640;
 }
 
+.sec-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
 .img-empty {
   padding: 18px 12px;
   text-align: center;
@@ -723,70 +742,112 @@ function onDialogKeydown(event: KeyboardEvent): void {
 
 .img-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
 }
 
-.img-card {
+.img-tile {
   position: relative;
+  aspect-ratio: 1;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
   background: var(--surface-2);
+  padding: 0;
 }
 
-.img-card.cover {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 35%, transparent);
-}
-
-.img-card img {
+.img-tile img {
   width: 100%;
-  aspect-ratio: 1;
+  height: 100%;
   object-fit: cover;
   display: block;
-  background: #0f172a08;
+}
+
+.img-tile.cover {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand);
 }
 
 .cover-badge {
   position: absolute;
-  top: 6px;
-  left: 6px;
-  padding: 2px 7px;
+  top: 4px;
+  left: 4px;
+  padding: 1px 6px;
   border-radius: 999px;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 650;
   color: #fff;
   background: var(--brand);
 }
 
-.img-actions {
+.tile-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
   display: flex;
-  flex-wrap: wrap;
   gap: 4px;
-  padding: 6px 8px 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
-.img-name {
-  padding: 6px 8px 8px;
-  font-size: 11px;
+.img-tile:hover .tile-actions,
+.img-tile:focus-within .tile-actions {
+  opacity: 1;
+}
+
+.tile-btn {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  cursor: pointer;
+}
+
+.tile-btn:hover {
+  background: var(--brand);
+}
+
+.tile-btn.danger:hover {
+  background: var(--err);
+}
+
+.add-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-style: dashed;
+  border-color: var(--line-2);
+  background: transparent;
   color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.add-tile:hover,
+.add-tile.on {
+  border-color: var(--brand);
+  color: var(--brand);
 }
 
 .picker {
-  margin-top: 4px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 .picker-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  width: 240px;
   padding: 0 10px;
-  height: 34px;
+  height: 30px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -796,86 +857,71 @@ function onDialogKeydown(event: KeyboardEvent): void {
 .picker-search .input {
   border: 0;
   box-shadow: none;
-  height: 32px;
+  height: 28px;
   padding: 0;
   background: transparent;
 }
 
-.picker-list {
-  max-height: 240px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 6px;
-}
-
-.picker-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  text-align: left;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
+.pick-tile {
   cursor: pointer;
   color: inherit;
 }
 
-.picker-item:hover,
-.picker-item.on {
-  background: var(--surface-2);
+.pick-tile:hover {
+  border-color: var(--line-2);
 }
 
-.picker-thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
-  object-fit: cover;
-  border: 1px solid var(--line);
-  flex: none;
+.pick-tile.on {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand);
 }
 
-.picker-thumb.ph {
+.pick-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
-  background: var(--surface-2);
-  color: var(--text-3);
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  background: rgba(15, 23, 42, 0.35);
+  color: transparent;
 }
 
-.picker-meta {
-  min-width: 0;
+.pick-tile.on .pick-check {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.pick-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 6px 4px;
+  font-size: 10.5px;
+  color: #fff;
+  text-align: left;
+  background: linear-gradient(transparent, rgba(15, 23, 42, 0.75));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-bar {
+  align-items: center;
+  background: var(--surface);
+}
+
+.picker-bar .spacer {
   flex: 1;
 }
 
-.picker-meta .nm {
+.sel-count {
   font-size: 12.5px;
-  font-weight: 560;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.picker-meta .path {
-  font-size: 11px;
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.picker-item .chk {
-  color: var(--brand);
-  flex: none;
-}
-
-.picker-ft {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 10px;
+  color: var(--text-2);
 }
 </style>

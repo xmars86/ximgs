@@ -45,7 +45,17 @@ function clampInterval(minutes: number): number {
 }
 
 function normalizeProvider(value: string | undefined): SyncProviderId {
-  return value === 's3' ? 's3' : DEFAULT_SYNC_PROVIDER
+  if (
+    value === 's3' ||
+    value === 'r2' ||
+    value === 'b2' ||
+    value === 'aws' ||
+    value === 'oss' ||
+    value === 'cos'
+  ) {
+    return value
+  }
+  return DEFAULT_SYNC_PROVIDER
 }
 
 function mapRow(row: RawRow): SyncSettingsRow {

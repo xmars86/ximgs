@@ -1,4 +1,4 @@
-export type SyncProviderId = 'b2' | 's3'
+export type SyncProviderId = 'b2' | 'r2' | 'aws' | 'oss' | 'cos' | 's3'
 
 export type SyncSseMode = '' | 'AES256'
 
@@ -56,6 +56,33 @@ export interface SyncRunResult {
   failed: number
   cancelled: boolean
 }
+
+/** How a sync batch was started. */
+export type SyncRunTrigger = 'manual' | 'scheduled' | 'retry'
+
+/** Persisted sync batch summary (SQLite sync_runs). */
+export interface SyncRunDto {
+  id: number
+  taskId: string
+  trigger: SyncRunTrigger
+  startedAt: string
+  finishedAt: string
+  scanned: number
+  uploaded: number
+  skipped: number
+  failed: number
+  cancelled: boolean
+  errorMessage: string | null
+  watchFolder: string | null
+  bucket: string | null
+}
+
+export interface SyncRunListResult {
+  items: SyncRunDto[]
+}
+
+/** Days of sync_runs history kept on disk. */
+export const SYNC_RUN_RETENTION_DAYS = 90
 
 export interface SyncStatusDto {
   isSchedulerRunning: boolean
