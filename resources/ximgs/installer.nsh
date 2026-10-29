@@ -4,17 +4,25 @@
 ;
 ; Timezone page: offer to set China Standard Time (Beijing, UTC+8), checked by default.
 ; Silent installs keep the default (apply China timezone).
+;
+; All installer-only UI / timezone code is gated with !ifndef BUILD_UNINSTALLER.
+; electron-builder treats NSIS unused-symbol warnings as fatal when building the uninstaller.
 
-!include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+
+!ifndef BUILD_UNINSTALLER
+!include "nsDialogs.nsh"
 
 Var XImgsTzDialog
 Var XImgsTzCheckbox
 Var XImgsSetChinaTz
+!endif
 
 !macro preInit
+  !ifndef BUILD_UNINSTALLER
   ; Default ON for silent (/S) installs where the custom page is skipped.
   StrCpy $XImgsSetChinaTz "1"
+  !endif
 
   StrCpy $0 "$PROFILE\Apps\xImgs"
   IfFileExists "D:\*.*" 0 ximgs_install_dir_done
@@ -29,6 +37,7 @@ Var XImgsSetChinaTz
   WriteRegExpandStr HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation "$0"
 !macroend
 
+!ifndef BUILD_UNINSTALLER
 ; Inserted before directory / install-mode pages (assisted installer only).
 !macro customWelcomePage
   Page custom XImgsTimezonePageCreate XImgsTimezonePageLeave
@@ -81,3 +90,4 @@ FunctionEnd
     DetailPrint "用户选择不修改系统时区"
   ${EndIf}
 !macroend
+!endif
