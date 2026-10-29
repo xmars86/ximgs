@@ -122,7 +122,7 @@ export async function runSyncOnce(taskId = `sync-${Date.now().toString(36)}`): P
         phase: 'done',
         current: 0,
         total: 0,
-        message: '目录中没有可同步的图片'
+        message: '目录中没有可同步的图片或视频'
       })
       return result
     }

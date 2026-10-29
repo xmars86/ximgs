@@ -2,6 +2,8 @@ import { readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|bmp|webp)$/i
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm|avi)$/i
+const SYNC_MEDIA_EXT = /\.(jpe?g|png|gif|bmp|webp|mp4|mov|m4v|webm|avi)$/i
 
 /** First char must be a letter (any script) or digit; else treat as system/special dir. */
 const NORMAL_DIR_START = /^[\p{L}\p{N}]/u
@@ -14,6 +16,15 @@ export interface ScannedImage {
 
 export function isImageFileName(name: string): boolean {
   return IMAGE_EXT.test(name)
+}
+
+export function isVideoFileName(name: string): boolean {
+  return VIDEO_EXT.test(name)
+}
+
+/** Images + videos accepted by folder sync / single upload. */
+export function isSyncMediaFileName(name: string): boolean {
+  return SYNC_MEDIA_EXT.test(name)
 }
 
 /**
@@ -52,7 +63,7 @@ function walk(rootDir: string, dir: string, out: ScannedImage[]): void {
       walk(rootDir, full, out)
       continue
     }
-    if (st.isFile() && isImageFileName(name)) {
+    if (st.isFile() && isSyncMediaFileName(name)) {
       out.push({
         absolutePath: full,
         relativePath: relative(rootDir, full).replace(/\\/g, '/'),

@@ -51,7 +51,8 @@ function normalizeProvider(value: string | undefined): SyncProviderId {
     value === 'b2' ||
     value === 'aws' ||
     value === 'oss' ||
-    value === 'cos'
+    value === 'cos' ||
+    value === 'qiniu'
   ) {
     return value
   }

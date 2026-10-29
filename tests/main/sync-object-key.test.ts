@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { buildObjectKey } from '../../src/main/domain/sync/objectKey'
 import { buildPublicUrl, encodeObjectKeyForUrl } from '../../src/shared/publicUrl'
 import { shouldUploadFile } from '../../src/main/domain/sync/shouldUpload'
-import { isImageFileName } from '../../src/main/domain/sync/scanner'
+import {
+  isImageFileName,
+  isSyncMediaFileName,
+  isVideoFileName
+} from '../../src/main/domain/sync/scanner'
 
 describe('buildObjectKey', () => {
   it('joins prefix and relative path', () => {
@@ -50,5 +54,23 @@ describe('isImageFileName', () => {
   it('detects images', () => {
     expect(isImageFileName('x.PNG')).toBe(true)
     expect(isImageFileName('x.txt')).toBe(false)
+    expect(isImageFileName('x.mp4')).toBe(false)
+  })
+})
+
+describe('isVideoFileName', () => {
+  it('detects videos', () => {
+    expect(isVideoFileName('clip.MP4')).toBe(true)
+    expect(isVideoFileName('a.mov')).toBe(true)
+    expect(isVideoFileName('a.webm')).toBe(true)
+    expect(isVideoFileName('a.jpg')).toBe(false)
+  })
+})
+
+describe('isSyncMediaFileName', () => {
+  it('accepts images and videos', () => {
+    expect(isSyncMediaFileName('x.webp')).toBe(true)
+    expect(isSyncMediaFileName('demo.m4v')).toBe(true)
+    expect(isSyncMediaFileName('note.txt')).toBe(false)
   })
 })

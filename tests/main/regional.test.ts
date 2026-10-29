@@ -67,6 +67,20 @@ describe('regional endpoints', () => {
     expect(isCosBucketName('imgs-1250000000')).toBe(true)
     expect(isCosBucketName('imgs')).toBe(false)
   })
+
+  it('builds Qiniu Kodo S3 endpoint and requires an explicit public base', () => {
+    expect(deriveRegionalEndpoint('qiniu', 'cn-east-1')).toBe(
+      'https://s3.cn-east-1.qiniucs.com'
+    )
+    expect(deriveRegionalEndpoint('qiniu', 'cn-south-1')).toBe(
+      'https://s3.cn-south-1.qiniucs.com'
+    )
+    expect(signingRegion('qiniu', 'cn-east-1')).toBe('cn-east-1')
+    expect(deriveRegionalPublicBase('qiniu', 'imgs', 'cn-east-1')).toBe('')
+    expect(
+      deriveRegionalPublicBase('qiniu', 'imgs', 'cn-east-1', 'https://cdn.example.com/')
+    ).toBe('https://cdn.example.com')
+  })
 })
 
 describe('regional checklist', () => {
@@ -105,5 +119,29 @@ describe('regional checklist', () => {
       accessKeyId: 'LTAIexamplekey'
     })
     expect(checklist.readyToSync).toBe(true)
+  })
+
+  it('requires a public domain for Qiniu Kodo', () => {
+    vi.mocked(hasSyncSecret).mockReturnValue(true)
+    const incomplete = buildSetupChecklist({
+      ...base,
+      provider: 'qiniu',
+      region: 'cn-east-1',
+      bucket: 'imgs',
+      accessKeyId: 'qiniuAccessKey'
+    })
+    expect(incomplete.readyToSync).toBe(false)
+    expect(incomplete.missing.some((m) => m.includes('公开访问根'))).toBe(true)
+
+    const complete = buildSetupChecklist({
+      ...base,
+      provider: 'qiniu',
+      region: 'cn-east-1',
+      bucket: 'imgs',
+      publicBaseUrl: 'https://img.example.com',
+      accessKeyId: 'qiniuAccessKey'
+    })
+    expect(complete.readyToSync).toBe(true)
+    expect(complete.provider).toBe('qiniu')
   })
 })

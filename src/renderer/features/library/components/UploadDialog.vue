@@ -20,8 +20,10 @@ const pending = ref<PendingFile[]>([])
 const pathInput = ref<HTMLInputElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 
-const IMAGE_EXT = /\.(jpe?g|png|gif|bmp|webp)$/i
-const MAX_BYTES = 20 * 1024 * 1024
+const MEDIA_EXT = /\.(jpe?g|png|gif|bmp|webp|mp4|mov|m4v|webm|avi)$/i
+const VIDEO_EXT = /\.(mp4|mov|m4v|webm|avi)$/i
+const IMAGE_MAX_BYTES = 20 * 1024 * 1024
+const VIDEO_MAX_BYTES = 500 * 1024 * 1024
 
 const pathPreview = computed(() => {
   const folder = gallery.uploadFolder.trim().replace(/^\/+|\/+$/g, '')
@@ -72,15 +74,19 @@ function fileNameFromPath(path: string): string {
   return parts[parts.length - 1] || path
 }
 
+function maxBytesForPath(path: string): number {
+  return VIDEO_EXT.test(path) ? VIDEO_MAX_BYTES : IMAGE_MAX_BYTES
+}
+
 function addPaths(entries: { path: string; size?: number | null }[]): void {
   const existing = new Set(pending.value.map((p) => p.path))
   let skippedOversize = 0
   for (const entry of entries) {
     const path = entry.path.trim()
     if (!path || existing.has(path)) continue
-    if (!IMAGE_EXT.test(path)) continue
+    if (!MEDIA_EXT.test(path)) continue
     const size = entry.size ?? null
-    if (size != null && size > MAX_BYTES) {
+    if (size != null && size > maxBytesForPath(path)) {
       skippedOversize += 1
       continue
     }
@@ -100,7 +106,7 @@ function addPaths(entries: { path: string; size?: number | null }[]): void {
 
 function pathsFromFileList(files: FileList | File[]): { path: string; size: number }[] {
   return Array.from(files)
-    .filter((file) => IMAGE_EXT.test(file.name))
+    .filter((file) => MEDIA_EXT.test(file.name))
     .map((file) => {
       try {
         return { path: window.ximgs.getPathForFile(file), size: file.size }
@@ -308,7 +314,7 @@ function onDialogKeydown(event: KeyboardEvent): void {
           ref="fileInput"
           class="file-input"
           type="file"
-          accept="image/jpeg,image/png,image/gif,image/bmp,image/webp,.jpg,.jpeg,.png,.gif,.bmp,.webp"
+          accept="image/jpeg,image/png,image/gif,image/bmp,image/webp,video/mp4,video/quicktime,video/webm,video/x-msvideo,.jpg,.jpeg,.png,.gif,.bmp,.webp,.mp4,.mov,.m4v,.webm,.avi"
           multiple
           @change="onFileInputChange"
         />

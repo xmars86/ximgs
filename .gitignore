@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Internal product docs (kept local / private remote only)
+b2-proxy/
+docs/
+
 # electron-vite / electron-builder outputs
 out/
 dist/
@@ -75,10 +79,3 @@ ehthumbs.db
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
-
-# Internal product docs (kept local / private remote only)
-docs/
-
-# Deprecated prototype UI (not part of Electron app)
-frontend/
-website/

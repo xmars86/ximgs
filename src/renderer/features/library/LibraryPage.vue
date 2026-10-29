@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import type { SyncFileDto, SyncFileStatusCounts, SyncFolderDto } from '@shared/sync'
@@ -38,7 +38,31 @@ const statusCounts = ref<SyncFileStatusCounts>({
 const treeChildren = reactive<Record<string, SyncFolderDto[]>>({})
 const treeExpanded = reactive<Record<string, boolean>>({ '': true })
 const treeLoading = reactive<Record<string, boolean>>({})
+const gridScrollEl = ref<HTMLElement | null>(null)
+const gridColCount = ref(4)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+let gridResizeObserver: ResizeObserver | null = null
+
+const GRID_COL_MIN = 200
+const GRID_COL_GAP = 14
+
+function updateGridColCount(width: number): void {
+  const n = Math.floor((width + GRID_COL_GAP) / (GRID_COL_MIN + GRID_COL_GAP))
+  gridColCount.value = Math.max(2, Math.min(6, n || 2))
+}
+
+function bindGridResizeObserver(): void {
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
+  const el = gridScrollEl.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  updateGridColCount(el.clientWidth)
+  gridResizeObserver = new ResizeObserver((entries) => {
+    const w = entries[0]?.contentRect.width
+    if (w != null) updateGridColCount(w)
+  })
+  gridResizeObserver.observe(el)
+}
 
 const statusChips = computed(() => [
   { value: '', label: t('library.statusAll'), count: statusCounts.value.all },
@@ -72,6 +96,15 @@ const sortedItems = computed(() => {
     list.sort((a, b) => String(b.syncedAt || '').localeCompare(String(a.syncedAt || '')))
   }
   return list
+})
+
+/** Distribute L→R across columns for waterfall reading order. */
+const gridColumns = computed(() => {
+  const cols: (typeof sortedItems.value)[] = Array.from({ length: gridColCount.value }, () => [])
+  sortedItems.value.forEach((item, i) => {
+    cols[i % gridColCount.value]!.push(item)
+  })
+  return cols
 })
 
 const displayPath = computed(() => {
@@ -158,10 +191,13 @@ onMounted(async () => {
   await syncScopeFromRoute()
   await refreshCounts()
   if (viewMode.value === 'tree') await ensureTreeChildren('')
+  if (viewMode.value === 'grid') await nextTick(() => bindGridResizeObserver())
 })
 
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  gridResizeObserver?.disconnect()
+  gridResizeObserver = null
 })
 
 watch(
@@ -203,13 +239,28 @@ watch(viewMode, async (mode) => {
   }
   selectedId.value = null
   if (mode === 'tree') {
+    gridResizeObserver?.disconnect()
+    gridResizeObserver = null
     await gallery.setListingMode('folder')
     treeExpanded[''] = true
     await ensureTreeChildren('')
   } else {
     await gallery.setListingMode('flat')
+    if (mode === 'grid') {
+      await nextTick(() => bindGridResizeObserver())
+    } else {
+      gridResizeObserver?.disconnect()
+      gridResizeObserver = null
+    }
   }
 })
+
+watch(
+  () => [viewMode.value, gallery.isEmpty] as const,
+  async ([mode, empty]) => {
+    if (mode === 'grid' && !empty) await nextTick(() => bindGridResizeObserver())
+  }
+)
 
 async function refreshCounts(): Promise<void> {
   try {
@@ -294,6 +345,10 @@ function formatExplorerDate(iso: string | null): string {
 
 function previewSrc(item: { publicUrl?: string | null; thumbLocalPath?: string | null }): string | null {
   return item.thumbLocalPath || item.publicUrl || null
+}
+
+function isVideoPath(path: string | null | undefined): boolean {
+  return /\.(mp4|mov|m4v|webm|avi)$/i.test(path || '')
 }
 
 function shortUrl(url: string | null): string {
@@ -696,55 +751,69 @@ const visibleTreeNodes = computed(() => {
               {{ t('library.uploadOne') }}
             </button>
           </div>
-          <div v-else class="grid-scroll scroll" style="flex: 1; min-height: 0">
+          <div
+            v-else
+            ref="gridScrollEl"
+            class="grid-scroll scroll"
+            style="flex: 1; min-height: 0"
+          >
             <div class="grid-view">
-              <div
-                v-for="item in sortedItems"
-                :key="item.id"
-                class="asset"
-                role="button"
-                tabindex="0"
-                @click="openPreview(item)"
-                @keydown.enter.prevent="openPreview(item)"
-              >
-                <div class="img">
-                  <img
-                    v-if="previewSrc(item)"
-                    :src="previewSrc(item)!"
-                    :alt="fileName(item.relativePath)"
-                    loading="lazy"
-                    referrerpolicy="no-referrer"
-                  />
-                  <div v-else class="img-ph"><UiIcon name="image" :size="28" /></div>
-                  <span
-                    class="badge"
-                    :class="{
-                      ok: item.status === 'synced',
-                      err: item.status === 'error',
-                      mute: item.status !== 'synced' && item.status !== 'error'
-                    }"
-                  >
-                    {{ statusLabel(item.status) }}
-                  </span>
-                </div>
-                <div class="meta">
-                  <div class="n-row">
-                    <div class="n" :title="fileName(item.relativePath)">
-                      {{ fileName(item.relativePath) }}
-                    </div>
-                    <button
-                      v-if="item.publicUrl"
-                      type="button"
-                      class="btn sm ghost copy-btn"
-                      :title="t('library.copy')"
-                      :aria-label="t('library.copy')"
-                      @click.stop="copyText(item.publicUrl)"
+              <div v-for="(col, colIdx) in gridColumns" :key="colIdx" class="grid-view-col">
+                <div
+                  v-for="item in col"
+                  :key="item.id"
+                  class="asset"
+                  role="button"
+                  tabindex="0"
+                  @click="openPreview(item)"
+                  @keydown.enter.prevent="openPreview(item)"
+                >
+                  <div class="img">
+                    <video
+                      v-if="isVideoPath(item.relativePath) && previewSrc(item)"
+                      :src="previewSrc(item)!"
+                      muted
+                      playsinline
+                      preload="metadata"
+                    />
+                    <img
+                      v-else-if="previewSrc(item)"
+                      :src="previewSrc(item)!"
+                      :alt="fileName(item.relativePath)"
+                      loading="lazy"
+                      referrerpolicy="no-referrer"
+                    />
+                    <div v-else class="img-ph"><UiIcon name="image" :size="28" /></div>
+                    <span
+                      class="badge"
+                      :class="{
+                        ok: item.status === 'synced',
+                        err: item.status === 'error',
+                        mute: item.status !== 'synced' && item.status !== 'error'
+                      }"
                     >
-                      <UiIcon name="copy" :size="13" />
-                    </button>
+                      {{ statusLabel(item.status) }}
+                    </span>
                   </div>
-                  <div class="p">
-                    {{ displayRelPath(item.relativePath) || '—' }} · {{ formatBytes(item.byteSize) }}
+                  <div class="meta">
+                    <div class="n-row">
+                      <div class="n" :title="fileName(item.relativePath)">
+                        {{ fileName(item.relativePath) }}
+                      </div>
+                      <button
+                        v-if="item.publicUrl"
+                        type="button"
+                        class="btn sm ghost copy-btn"
+                        :title="t('library.copy')"
+                        :aria-label="t('library.copy')"
+                        @click.stop="copyText(item.publicUrl)"
+                      >
+                        <UiIcon name="copy" :size="13" />
+                      </button>
+                    </div>
+                    <div class="p">
+                      {{ displayRelPath(item.relativePath) || '—' }} · {{ formatBytes(item.byteSize) }}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -814,8 +883,16 @@ const visibleTreeNodes = computed(() => {
                   >
                     <td>
                       <div class="t-file">
+                        <video
+                          v-if="isVideoPath(item.relativePath) && previewSrc(item)"
+                          class="thumb"
+                          :src="previewSrc(item)!"
+                          muted
+                          playsinline
+                          preload="metadata"
+                        />
                         <img
-                          v-if="previewSrc(item)"
+                          v-else-if="previewSrc(item)"
                           class="thumb"
                           :src="previewSrc(item)!"
                           alt=""
@@ -1033,8 +1110,15 @@ const visibleTreeNodes = computed(() => {
                     @keydown.enter.prevent="openPreview(item)"
                   >
                     <div class="ex-image">
+                      <video
+                        v-if="isVideoPath(item.relativePath) && previewSrc(item)"
+                        :src="previewSrc(item)!"
+                        muted
+                        playsinline
+                        preload="metadata"
+                      />
                       <img
-                        v-if="previewSrc(item)"
+                        v-else-if="previewSrc(item)"
                         :src="previewSrc(item)!"
                         :alt="fileName(item.relativePath)"
                         loading="lazy"
@@ -1121,8 +1205,15 @@ const visibleTreeNodes = computed(() => {
         </div>
         <div class="drawer-bd lib-drawer-bd">
           <div class="drawer-preview">
+            <video
+              v-if="isVideoPath(gallery.preview.relativePath) && previewSrc(gallery.preview)"
+              :src="previewSrc(gallery.preview)!"
+              controls
+              playsinline
+              preload="metadata"
+            />
             <img
-              v-if="previewSrc(gallery.preview)"
+              v-else-if="previewSrc(gallery.preview)"
               :src="previewSrc(gallery.preview)!"
               :alt="fileName(gallery.preview.relativePath)"
               referrerpolicy="no-referrer"

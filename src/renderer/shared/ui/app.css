@@ -1141,6 +1141,7 @@ table.tbl tr.sel {
   border: 1px solid var(--line);
   background: #f2f5fa;
   display: block;
+  object-fit: cover;
 }
 
 .thumb svg {

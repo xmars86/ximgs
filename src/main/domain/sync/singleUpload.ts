@@ -12,7 +12,7 @@ import {
 } from '@main/db/repos/syncFiles'
 import { putObjectFile } from '@main/providers/s3'
 import { b2PublicUrl, putB2ObjectFile } from '@main/providers/backblaze'
-import { isImageFileName } from './scanner'
+import { isSyncMediaFileName } from './scanner'
 import { buildObjectKey, buildPublicUrl } from './objectKey'
 import { scheduleMirrorToWatchFolder } from './mirrorLocal'
 import { loadSyncSecret } from './secrets'
@@ -33,7 +33,7 @@ function safeSegment(name: string): string {
 function safeFileName(name: string): string {
   const ext = extname(name)
   const stem = safeSegment(basename(name, ext))
-  return `${stem || 'image'}${ext.toLowerCase() || '.jpg'}`
+  return `${stem || 'file'}${ext.toLowerCase() || '.jpg'}`
 }
 
 /** Normalize user folder input: strip `..`, collapse slashes, sanitize segments. */
@@ -75,8 +75,11 @@ export async function uploadSingleImage(
   if (!filePath?.trim() || !existsSync(filePath)) {
     throw new AppError('FILE_NOT_FOUND', '文件不存在')
   }
-  if (!isImageFileName(filePath)) {
-    throw new AppError('NOT_IMAGE', '仅支持 jpg / png / gif / bmp / webp')
+  if (!isSyncMediaFileName(filePath)) {
+    throw new AppError(
+      'NOT_MEDIA',
+      '仅支持 jpg / png / gif / bmp / webp / mp4 / mov / m4v / webm / avi'
+    )
   }
 
   const secret = loadSyncSecret()

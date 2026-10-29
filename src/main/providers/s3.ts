@@ -41,6 +41,15 @@ function contentTypeFor(filePath: string): string {
       return 'image/bmp'
     case '.webp':
       return 'image/webp'
+    case '.mp4':
+    case '.m4v':
+      return 'video/mp4'
+    case '.mov':
+      return 'video/quicktime'
+    case '.webm':
+      return 'video/webm'
+    case '.avi':
+      return 'video/x-msvideo'
     default:
       return 'application/octet-stream'
   }

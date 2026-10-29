@@ -28,7 +28,7 @@ The desktop edition is **free for personal use**: open and go—no account syste
 
 - **Scheduled folder sync** — Watch a local asset folder; auto-upload on an interval; sync now anytime
 - **Incremental uploads** — Detect new and changed files by content; skip unchanged files
-- **Your own bucket** — Backblaze B2 and mainstream S3-compatible services (R2, OSS, MinIO, and more)
+- **Your own bucket** — Backblaze B2, Qiniu Kodo, and mainstream S3-compatible services (R2, OSS, COS, MinIO, and more)
 - **Asset library** — Grid / list / folder views, search, preview, copy link
 - **Single-file upload** — Quick one-offs via paste or file picker into the same bucket
 - **Product SKUs** — Maintain codes and names, bind multiple images, set covers

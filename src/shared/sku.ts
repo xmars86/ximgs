@@ -1,6 +1,6 @@
 /** Standalone product SKU catalog (independent of library products/stores). */
 
-export const STANDALONE_SKU_LIMIT = 20
+export const STANDALONE_SKU_LIMIT = 100
 export const SKU_PAGE_SIZE = 10
 export const SKU_IMAGE_LIMIT = 30
 

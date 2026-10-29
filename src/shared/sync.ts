@@ -1,4 +1,4 @@
-export type SyncProviderId = 'b2' | 'r2' | 'aws' | 'oss' | 'cos' | 's3'
+export type SyncProviderId = 'b2' | 'r2' | 'aws' | 'oss' | 'cos' | 'qiniu' | 's3'
 
 export type SyncSseMode = '' | 'AES256'
 

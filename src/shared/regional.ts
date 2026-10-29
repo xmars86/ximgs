@@ -1,7 +1,7 @@
-export type RegionalProviderId = 'aws' | 'oss' | 'cos'
+export type RegionalProviderId = 'aws' | 'oss' | 'cos' | 'qiniu'
 
 export function isRegionalProvider(value: string): value is RegionalProviderId {
-  return value === 'aws' || value === 'oss' || value === 'cos'
+  return value === 'aws' || value === 'oss' || value === 'cos' || value === 'qiniu'
 }
 
 /** Console region `cn-hangzhou` and SDK region `oss-cn-hangzhou` both normalize to the latter. */
@@ -37,6 +37,10 @@ export function deriveRegionalEndpoint(
     return `https://${normalizeOssRegion(raw)}.aliyuncs.com`
   }
 
+  if (provider === 'qiniu') {
+    return `https://s3.${raw.toLowerCase()}.qiniucs.com`
+  }
+
   return `https://cos.${raw.toLowerCase()}.myqcloud.com`
 }
 
@@ -58,6 +62,9 @@ export function deriveRegionalPublicBase(
   const name = bucket.trim()
   const raw = region.trim()
   if (!name || !raw) return ''
+
+  // Qiniu S3 endpoints reject anonymous GETs — public URLs must use CDN / test domain.
+  if (provider === 'qiniu') return ''
 
   if (provider === 'aws') {
     const id = raw.toLowerCase()

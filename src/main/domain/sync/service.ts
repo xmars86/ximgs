@@ -352,12 +352,32 @@ export async function uploadClipboard(folderPath?: string): Promise<SingleUpload
 export async function chooseImagePaths(): Promise<string[]> {
   const win = BrowserWindow.getFocusedWindow()
   const options: Electron.OpenDialogOptions = {
-    title: '选择要上传的图片',
+    title: '选择要上传的图片或视频',
     properties: ['openFile', 'multiSelections'],
     filters: [
       {
+        name: 'Images & Videos',
+        extensions: [
+          'jpg',
+          'jpeg',
+          'png',
+          'gif',
+          'bmp',
+          'webp',
+          'mp4',
+          'mov',
+          'm4v',
+          'webm',
+          'avi'
+        ]
+      },
+      {
         name: 'Images',
         extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
+      },
+      {
+        name: 'Videos',
+        extensions: ['mp4', 'mov', 'm4v', 'webm', 'avi']
       }
     ]
   }

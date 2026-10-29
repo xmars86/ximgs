@@ -155,6 +155,8 @@ const regionPlaceholder = computed(() => {
   if (form.provider === 'aws') return 'ap-southeast-1'
   if (form.provider === 'oss') return 'cn-hangzhou'
   if (form.provider === 'cos') return 'ap-guangzhou'
+  if (form.provider === 'qiniu') return 'cn-east-1'
+  if (form.provider === 's3') return 'us-east-1'
   return 'auto'
 })
 
@@ -165,7 +167,15 @@ const endpointPlaceholder = computed(() => {
   if (form.provider === 'aws') return 'https://s3.<region>.amazonaws.com'
   if (form.provider === 'oss') return 'https://oss-<region>.aliyuncs.com'
   if (form.provider === 'cos') return 'https://cos.<region>.myqcloud.com'
-  return 'https://s3.amazonaws.com'
+  if (form.provider === 'qiniu') return 'https://s3.<region>.qiniucs.com'
+  if (form.provider === 's3') return 'https://s3.example.com'
+  return 'https://s3.example.com'
+})
+
+const publicPlaceholder = computed(() => {
+  if (form.provider === 'r2') return 'https://pub-xxxx.r2.dev'
+  if (form.provider === 'qiniu' || form.provider === 's3') return 'https://img.example.com'
+  return derivedPublic.value || ''
 })
 
 const PROVIDER_HOST: Partial<Record<SyncProviderId, string>> = {
@@ -173,7 +183,8 @@ const PROVIDER_HOST: Partial<Record<SyncProviderId, string>> = {
   b2: 'backblazeb2.com',
   aws: 'amazonaws.com',
   oss: 'aliyuncs.com',
-  cos: 'myqcloud.com'
+  cos: 'myqcloud.com',
+  qiniu: 'qiniucs.com'
 }
 
 const providers = computed(() => [
@@ -208,10 +219,17 @@ const providers = computed(() => [
     icon: 'image' as const
   },
   {
+    id: 'qiniu' as const,
+    name: '七牛云 Kodo',
+    desc: t('settings.provQiniu'),
+    icon: 'upload' as const
+  },
+  {
     id: 's3' as const,
     name: t('settings.provS3Name'),
     desc: t('settings.provS3'),
-    icon: 'cloudCheck' as const
+    icon: 'cloudCheck' as const,
+    other: true
   }
 ])
 
@@ -503,14 +521,14 @@ async function copyAuthorEmail(): Promise<void> {
               <div class="spacer" />
               <span class="hint">{{ t('settings.storageHint') }}</span>
             </div>
-            <div class="card-bd">
+            <div class="card-bd storage-bd">
               <div class="providers">
                 <button
                   v-for="p in providers"
                   :key="p.id"
                   type="button"
                   class="prov"
-                  :class="{ on: form.provider === p.id }"
+                  :class="{ on: form.provider === p.id, other: Boolean(p.other) }"
                   @click="selectProvider(p.id)"
                 >
                   <span class="tick"><UiIcon name="check" :size="9" /></span>
@@ -522,156 +540,183 @@ async function copyAuthorEmail(): Promise<void> {
 
               <div class="hr" />
 
-              <div v-if="form.provider === 'r2'" class="form-row">
-                <div class="lbl">
-                  <b>Account ID</b>
-                  <span>{{ t('settings.accountIdHint') }}</span>
+              <div v-if="form.provider === 's3'" class="storage-callout">
+                {{ t('settings.s3Callout') }}
+              </div>
+
+              <div class="storage-fields">
+                <div v-if="form.provider === 'r2'" class="form-row">
+                  <div class="lbl">
+                    <b>Account ID</b>
+                    <span>{{ t('settings.accountIdHint') }}</span>
+                  </div>
+                  <div>
+                    <input
+                      v-model="form.accountId"
+                      class="input mono field-lg"
+                      placeholder="a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <div class="tip" style="margin-top: 5px">{{ t('settings.accountIdTip') }}</div>
+                  </div>
                 </div>
-                <div>
+                <div v-if="form.provider !== 'r2'" class="form-row">
+                  <div class="lbl">
+                    <b>Region</b>
+                    <span>{{ t('settings.regionHint') }}</span>
+                  </div>
+                  <div>
+                    <input
+                      v-model="form.region"
+                      class="input field-sm"
+                      :placeholder="regionPlaceholder"
+                    />
+                    <div v-if="form.provider === 's3'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.s3RegionTip') }}
+                    </div>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="lbl"><b>Endpoint</b><span>S3 API</span></div>
+                  <div>
+                    <input
+                      v-model="form.endpoint"
+                      class="input mono field-lg"
+                      :placeholder="endpointPlaceholder"
+                    />
+                    <div
+                      v-if="derivedEndpoint && !form.endpoint.trim()"
+                      class="tip"
+                      style="margin-top: 5px"
+                    >
+                      {{ t('sync.endpointHint', { endpoint: derivedEndpoint }) }}
+                    </div>
+                    <div v-else-if="form.provider === 'r2'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.r2EndpointTip') }}
+                    </div>
+                    <div v-else-if="form.provider === 's3'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.s3EndpointTip') }}
+                    </div>
+                    <div v-if="form.provider === 'oss'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.ossEndpointTip') }}
+                    </div>
+                    <div v-if="form.provider === 'qiniu'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.qiniuEndpointTip') }}
+                    </div>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="lbl"><b>Bucket</b><span>{{ t('settings.bucketHint') }}</span></div>
+                  <div>
+                    <input
+                      v-model="form.bucket"
+                      class="input mono field-md"
+                      :placeholder="
+                        form.provider === 'cos'
+                          ? 'images-1250000000'
+                          : form.provider === 'qiniu'
+                            ? 'ximgs-media'
+                            : 'my-bucket'
+                      "
+                    />
+                    <div v-if="form.provider === 'cos'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.cosBucketTip') }}
+                    </div>
+                    <div v-if="form.provider === 'qiniu'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.qiniuBucketTip') }}
+                    </div>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="lbl">
+                    <b>{{ t('sync.publicBase') }}</b>
+                    <span>{{ t('settings.publicHint') }}</span>
+                  </div>
+                  <div>
+                    <input
+                      v-model="form.publicBaseUrl"
+                      class="input mono field-lg"
+                      :placeholder="publicPlaceholder"
+                    />
+                    <div v-if="form.provider === 'r2'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.r2PublicTip') }}
+                    </div>
+                    <div v-else-if="form.provider === 'qiniu'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.qiniuPublicTip') }}
+                    </div>
+                    <div v-else-if="form.provider === 's3'" class="tip" style="margin-top: 5px">
+                      {{ t('settings.s3PublicTip') }}
+                    </div>
+                    <div
+                      v-else-if="derivedPublic && !form.publicBaseUrl.trim()"
+                      class="tip"
+                      style="margin-top: 5px"
+                    >
+                      {{ t('sync.endpointHint', { endpoint: derivedPublic }) }}
+                    </div>
+                    <div
+                      v-else-if="
+                        form.provider === 'aws' || form.provider === 'oss' || form.provider === 'cos'
+                      "
+                      class="tip"
+                      style="margin-top: 5px"
+                    >
+                      {{ t('settings.regionalPublicTip') }}
+                    </div>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="lbl">
+                    <b>{{ t('sync.prefix') }}</b>
+                    <span>{{ t('settings.prefixHint') }}</span>
+                  </div>
                   <input
-                    v-model="form.accountId"
-                    class="input mono"
-                    style="max-width: 420px"
-                    placeholder="a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+                    v-model="form.objectPrefix"
+                    class="input mono field-sm"
+                    placeholder="images/"
+                  />
+                </div>
+                <div class="form-row">
+                  <div class="lbl">
+                    <b>{{ form.provider === 'b2' ? 'Key ID' : 'Access Key ID' }}</b>
+                    <span>{{ t('settings.keyHint') }}</span>
+                  </div>
+                  <input
+                    v-model="form.accessKeyId"
+                    class="input mono field-md"
                     autocomplete="off"
-                    spellcheck="false"
                   />
-                  <div class="tip" style="margin-top: 5px">{{ t('settings.accountIdTip') }}</div>
                 </div>
-              </div>
-              <div v-if="form.provider !== 'r2'" class="form-row">
-                <div class="lbl"><b>Region</b><span>{{ t('settings.regionHint') }}</span></div>
-                <input
-                  v-model="form.region"
-                  class="input"
-                  style="max-width: 280px"
-                  :placeholder="regionPlaceholder"
-                />
-              </div>
-              <div class="form-row">
-                <div class="lbl"><b>Endpoint</b><span>S3 API</span></div>
-                <div>
-                  <input
-                    v-model="form.endpoint"
-                    class="input mono"
-                    :placeholder="endpointPlaceholder"
-                  />
-                  <div
-                    v-if="derivedEndpoint && !form.endpoint.trim()"
-                    class="tip"
-                    style="margin-top: 5px"
-                  >
-                    {{ t('sync.endpointHint', { endpoint: derivedEndpoint }) }}
+                <div class="form-row">
+                  <div class="lbl">
+                    <b>{{ form.provider === 'b2' ? 'Application Key' : 'Secret Access Key' }}</b>
+                    <span>{{ t('settings.secretHint') }}</span>
                   </div>
-                  <div v-else-if="form.provider === 'r2'" class="tip" style="margin-top: 5px">
-                    {{ t('settings.r2EndpointTip') }}
-                  </div>
-                  <div v-if="form.provider === 'oss'" class="tip" style="margin-top: 5px">
-                    {{ t('settings.ossEndpointTip') }}
+                  <div>
+                    <input
+                      v-model="sync.draftSecret"
+                      class="input field-md"
+                      type="password"
+                      autocomplete="new-password"
+                      :placeholder="sync.config?.hasSecretAccessKey ? t('sync.secretKeep') : ''"
+                    />
+                    <div class="row" style="margin-top: 6px; gap: 6px">
+                      <span v-if="sync.config?.hasSecretAccessKey" class="badge mute">
+                        <UiIcon name="lock" :size="11" />
+                        {{ t('settings.secretEncrypted') }}
+                      </span>
+                      <span class="tip">{{ t('sync.secretKeep') }}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div class="form-row">
-                <div class="lbl"><b>Bucket</b><span>{{ t('settings.bucketHint') }}</span></div>
-                <div>
-                  <input
-                    v-model="form.bucket"
-                    class="input mono"
-                    style="max-width: 360px"
-                    :placeholder="form.provider === 'cos' ? 'images-1250000000' : ''"
-                  />
-                  <div v-if="form.provider === 'cos'" class="tip" style="margin-top: 5px">
-                    {{ t('settings.cosBucketTip') }}
-                  </div>
+                <div v-if="form.provider === 'b2'" class="form-row">
+                  <div class="lbl"><b>SSE-B2</b><span>AES256</span></div>
+                  <select v-model="form.sseMode" class="select field-sm">
+                    <option value="">{{ t('sync.sseOff') }}</option>
+                    <option value="AES256">AES256</option>
+                  </select>
                 </div>
-              </div>
-              <div class="form-row">
-                <div class="lbl">
-                  <b>{{ t('sync.publicBase') }}</b>
-                  <span>{{ t('settings.publicHint') }}</span>
-                </div>
-                <div>
-                  <input
-                    v-model="form.publicBaseUrl"
-                    class="input mono"
-                    :placeholder="
-                      form.provider === 'r2'
-                        ? 'https://pub-xxxx.r2.dev'
-                        : derivedPublic || ''
-                    "
-                  />
-                  <div v-if="form.provider === 'r2'" class="tip" style="margin-top: 5px">
-                    {{ t('settings.r2PublicTip') }}
-                  </div>
-                  <div
-                    v-else-if="derivedPublic && !form.publicBaseUrl.trim()"
-                    class="tip"
-                    style="margin-top: 5px"
-                  >
-                    {{ t('sync.endpointHint', { endpoint: derivedPublic }) }}
-                  </div>
-                  <div
-                    v-else-if="form.provider === 'aws' || form.provider === 'oss' || form.provider === 'cos'"
-                    class="tip"
-                    style="margin-top: 5px"
-                  >
-                    {{ t('settings.regionalPublicTip') }}
-                  </div>
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="lbl">
-                  <b>{{ t('sync.prefix') }}</b>
-                  <span>{{ t('settings.prefixHint') }}</span>
-                </div>
-                <input
-                  v-model="form.objectPrefix"
-                  class="input mono"
-                  style="max-width: 280px"
-                  placeholder="images/"
-                />
-              </div>
-              <div class="form-row">
-                <div class="lbl">
-                  <b>{{ form.provider === 'b2' ? 'Key ID' : 'Access Key ID' }}</b>
-                  <span>{{ t('settings.keyHint') }}</span>
-                </div>
-                <input
-                  v-model="form.accessKeyId"
-                  class="input mono"
-                  style="max-width: 360px"
-                  autocomplete="off"
-                />
-              </div>
-              <div class="form-row">
-                <div class="lbl">
-                  <b>{{ form.provider === 'b2' ? 'Application Key' : 'Secret Access Key' }}</b>
-                  <span>{{ t('settings.secretHint') }}</span>
-                </div>
-                <div>
-                  <input
-                    v-model="sync.draftSecret"
-                    class="input"
-                    type="password"
-                    style="max-width: 360px"
-                    autocomplete="new-password"
-                    :placeholder="sync.config?.hasSecretAccessKey ? t('sync.secretKeep') : ''"
-                  />
-                  <div class="row" style="margin-top: 6px; gap: 6px">
-                    <span v-if="sync.config?.hasSecretAccessKey" class="badge mute">
-                      <UiIcon name="lock" :size="11" />
-                      {{ t('settings.secretEncrypted') }}
-                    </span>
-                    <span class="tip">{{ t('sync.secretKeep') }}</span>
-                  </div>
-                </div>
-              </div>
-              <div v-if="form.provider === 'b2'" class="form-row">
-                <div class="lbl"><b>SSE-B2</b><span>AES256</span></div>
-                <select v-model="form.sseMode" class="select" style="max-width: 220px">
-                  <option value="">{{ t('sync.sseOff') }}</option>
-                  <option value="AES256">AES256</option>
-                </select>
               </div>
             </div>
             <div class="set-foot">

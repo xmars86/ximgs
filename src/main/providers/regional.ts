@@ -13,7 +13,8 @@ import { createS3Client, type S3UploadConfig } from './s3'
 const LABEL: Record<RegionalProviderId, string> = {
   aws: 'AWS S3',
   oss: '阿里云 OSS',
-  cos: '腾讯云 COS'
+  cos: '腾讯云 COS',
+  qiniu: '七牛云 Kodo'
 }
 
 export interface RegionalConfigInput {
@@ -80,7 +81,9 @@ export function resolveRegionalConfig(
   if (!publicBaseUrl) {
     throw new AppError(
       'STORAGE_CONFIG',
-      `缺少 ${name} 公开访问根（留空将使用桶默认域名，或填写 CDN / 自定义域名）`
+      provider === 'qiniu'
+        ? '缺少七牛公开访问根：请填写测试域名或 CDN / 自定义域名（S3 Endpoint 不可匿名访问）'
+        : `缺少 ${name} 公开访问根（留空将使用桶默认域名，或填写 CDN / 自定义域名）`
     )
   }
 
@@ -98,7 +101,7 @@ export function resolveRegionalConfig(
 }
 
 export function createRegionalClient(config: RegionalResolvedConfig): S3Client {
-  // OSS / COS reject the default CRC32 checksum headers from recent AWS SDK v3.
+  // Non-AWS S3 APIs often reject default CRC32 checksum headers from recent AWS SDK v3.
   const checksum =
     config.provider === 'aws'
       ? undefined

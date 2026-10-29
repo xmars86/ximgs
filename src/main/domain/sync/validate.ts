@@ -61,14 +61,26 @@ export function buildSetupChecklist(settings: SyncSettingsRow): SyncSetupCheckli
       deriveRegionalPublicBase(settings.provider, settings.bucket, settings.region, '')
     hasPublic = Boolean(regionalPublic)
     const label =
-      settings.provider === 'aws' ? 'AWS S3' : settings.provider === 'oss' ? '阿里云 OSS' : '腾讯云 COS'
+      settings.provider === 'aws'
+        ? 'AWS S3'
+        : settings.provider === 'oss'
+          ? '阿里云 OSS'
+          : settings.provider === 'qiniu'
+            ? '七牛云 Kodo'
+            : '腾讯云 COS'
     if (!hasRegion) missing.push(`缺少 ${label} Region`)
     if (!regionalEndpoint) missing.push(`缺少 ${label} Endpoint（可填 Region 后自动生成）`)
     if (!hasBucket) missing.push('缺少 Bucket 桶名')
     if (settings.provider === 'cos' && hasBucket && !isCosBucketName(settings.bucket)) {
       missing.push('COS 桶名需为 bucketname-APPID，例如 images-1250000000')
     }
-    if (!hasPublic) missing.push(`缺少 ${label} 公开访问根（桶默认域名或 CDN）`)
+    if (!hasPublic) {
+      missing.push(
+        settings.provider === 'qiniu'
+          ? '缺少七牛公开访问根（测试域名或 CDN / 自定义域名，S3 Endpoint 不可匿名访问）'
+          : `缺少 ${label} 公开访问根（桶默认域名或 CDN）`
+      )
+    }
     if (!hasKey) missing.push('缺少 Access Key ID')
     if (!hasSecret) missing.push('缺少 Secret Access Key（请填写并保存）')
   } else {

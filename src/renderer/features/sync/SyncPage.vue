@@ -58,6 +58,7 @@ const providerLabel = computed(() => {
   if (p === 'aws') return t('sync.providerAws')
   if (p === 'oss') return t('sync.providerOss')
   if (p === 'cos') return t('sync.providerCos')
+  if (p === 'qiniu') return t('sync.providerQiniu')
   if (p === 'b2') return 'Backblaze B2'
   if (p === 's3') return t('sync.providerS3')
   return t('sync.noBucketYet')

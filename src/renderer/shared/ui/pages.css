@@ -286,28 +286,32 @@
   color: var(--brand);
 }
 
-/* Scrollport is height-constrained; inner multicol must be height:auto or columns fill sideways */
+/* Scrollport is height-constrained; waterfall columns grow with content */
 .grid-scroll {
   min-height: 0;
 }
 
-/* Waterfall (masonry) via CSS multi-column — natural image heights, no overlap */
+/* Waterfall: flex columns (L→R), natural image heights with a tall-image cap */
 .grid-view {
-  columns: 180px;
-  column-gap: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
   padding: 16px;
-  height: auto;
   width: 100%;
 }
 
+.grid-view-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .asset {
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-  page-break-inside: avoid;
-  display: inline-block;
+  display: block;
   width: 100%;
-  margin: 0 0 14px;
-  vertical-align: top;
+  margin: 0;
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
@@ -331,13 +335,19 @@
   background: #f3f6fb;
   border-bottom: 1px solid var(--line);
   width: 100%;
+  max-height: 280px;
   overflow: hidden;
 }
 
-.asset .img > img {
+.asset .img > img,
+.asset .img > video {
   display: block;
   width: 100%;
   height: auto;
+  max-height: 280px;
+  object-fit: cover;
+  object-position: top center;
+  background: #0f172a;
 }
 
 .asset .img-ph {
@@ -345,6 +355,7 @@
   place-items: center;
   width: 100%;
   aspect-ratio: 1 / 1;
+  max-height: 280px;
   color: var(--text-3);
   background: #f3f6fb;
 }
@@ -826,10 +837,12 @@
   border-bottom: 1px solid var(--line);
 }
 
-.ex-image > img {
+.ex-image > img,
+.ex-image > video {
   display: block;
   width: 100%;
   height: auto;
+  background: #0f172a;
 }
 
 .ex-image-placeholder {
@@ -1291,15 +1304,15 @@
 
 .providers {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .prov {
   border: 1px solid var(--line-2);
   border-radius: 10px;
-  padding: 11px 12px;
+  padding: 10px 11px;
   background: #fff;
   cursor: pointer;
   transition: border-color var(--t), box-shadow var(--t), background var(--t);
@@ -1307,6 +1320,12 @@
   text-align: left;
   color: inherit;
   font: inherit;
+  min-height: 84px;
+}
+
+.prov.other {
+  border-style: dashed;
+  background: var(--surface-2);
 }
 
 .prov:hover {
@@ -1316,14 +1335,15 @@
 
 .prov.on {
   border-color: var(--brand);
+  border-style: solid;
   background: linear-gradient(180deg, #f7fbff, #fff);
   box-shadow: 0 0 0 3px rgba(27, 110, 243, 0.1);
 }
 
 .prov .tick {
   position: absolute;
-  top: 9px;
-  right: 9px;
+  top: 8px;
+  right: 8px;
   width: 15px;
   height: 15px;
   border-radius: 50%;
@@ -1338,21 +1358,23 @@
 }
 
 .prov .nm {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 620;
-  margin-top: 8px;
+  margin-top: 7px;
+  line-height: 1.25;
+  padding-right: 16px;
 }
 
 .prov .ds {
   font-size: 10.5px;
   color: var(--text-3);
   margin-top: 2px;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .prov .ic {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 7px;
   display: grid;
   place-items: center;
@@ -1363,6 +1385,46 @@
 .prov.on .ic {
   background: var(--brand-50);
   color: var(--brand);
+}
+
+.storage-bd {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.storage-callout {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, var(--line));
+  background: color-mix(in srgb, var(--brand-50) 70%, #fff);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.storage-fields {
+  max-width: 720px;
+}
+
+.storage-fields .field-sm {
+  max-width: 240px;
+  width: 100%;
+}
+
+.storage-fields .field-md {
+  max-width: 360px;
+  width: 100%;
+}
+
+.storage-fields .field-lg {
+  max-width: 480px;
+  width: 100%;
+}
+
+.storage-fields .form-row {
+  padding: 11px 0;
 }
 
 .edition-card {
@@ -1453,10 +1515,11 @@
 
 .form-row {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: 148px minmax(0, 1fr);
+  gap: 14px;
   padding: 14px 0;
   border-bottom: 1px solid #f2f5fa;
+  align-items: start;
 }
 
 .form-row:last-child {
@@ -1870,13 +1933,15 @@
   padding: 6px;
 }
 
-.drawer-preview img {
+.drawer-preview img,
+.drawer-preview video {
   display: block;
   max-width: 100%;
   max-height: min(36vh, calc(100vh - 240px), 640px);
   width: auto;
   height: auto;
   object-fit: contain;
+  background: #0f172a;
 }
 
 .drawer-sect {
@@ -1954,7 +2019,17 @@
   }
 
   .providers {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .storage-fields {
+    max-width: none;
+  }
+
+  .storage-fields .field-sm,
+  .storage-fields .field-md,
+  .storage-fields .field-lg {
+    max-width: none;
   }
 
   .ex-body {
