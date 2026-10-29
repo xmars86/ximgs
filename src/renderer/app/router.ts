@@ -10,6 +10,11 @@ export const router = createRouter({
       component: () => import('../features/library/LibraryPage.vue')
     },
     {
+      path: '/trash',
+      name: 'trash',
+      component: () => import('../features/library/LibraryPage.vue')
+    },
+    {
       path: '/sync',
       name: 'sync',
       component: () => import('../features/sync/SyncPage.vue')

@@ -3,8 +3,15 @@ import { app, BrowserWindow, dialog } from 'electron'
 import { AppError } from '@shared/errors'
 import type { IpcMethod } from '@shared/ipc'
 import { normalizeLocale } from '@shared/locale'
-import { getLocale, setLocale } from '@main/runtime/config'
+import {
+  getDesktopPrefs,
+  getLocale,
+  setDesktopPrefs,
+  setLocale
+} from '@main/runtime/config'
 import { getAppPaths } from '@main/runtime/paths'
+import { refreshApplicationMenu } from '@main/menu'
+import { refreshAppTrayMenu } from '@main/tray'
 
 type Handler = (data: unknown) => unknown | Promise<unknown>
 
@@ -36,7 +43,25 @@ export function handleSystem(): Partial<Record<IpcMethod, Handler>> {
       if (raw !== 'zh-CN' && raw !== 'en-US' && raw !== 'zh' && raw !== 'en') {
         throw new AppError('INVALID_LOCALE', 'locale must be zh-CN or en-US')
       }
-      return { locale: setLocale(normalizeLocale(raw)) }
+      const locale = setLocale(normalizeLocale(raw))
+      refreshAppTrayMenu()
+      refreshApplicationMenu()
+      return { locale }
+    },
+    'system.getDesktopPrefs': () => getDesktopPrefs(),
+    'system.setDesktopPrefs': (data) => {
+      const obj = asObject(data)
+      const update: {
+        closeToTray?: boolean
+        openAtLogin?: boolean
+        startHidden?: boolean
+      } = {}
+      if (typeof obj.closeToTray === 'boolean') update.closeToTray = obj.closeToTray
+      if (typeof obj.openAtLogin === 'boolean') update.openAtLogin = obj.openAtLogin
+      if (typeof obj.startHidden === 'boolean') update.startHidden = obj.startHidden
+      const prefs = setDesktopPrefs(update)
+      refreshAppTrayMenu()
+      return prefs
     },
     'system.saveTextFile': async (data) => {
       const obj = asObject(data)

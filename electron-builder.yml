@@ -12,6 +12,9 @@ extraResources:
     filter:
       - app.ico
       - logo.png
+      - tray.png
+      - tray-16.png
+      - tray-32.png
 asar: true
 asarUnpack:
   - '**/sql.js/dist/*'

@@ -3,6 +3,9 @@ import { join, relative } from 'node:path'
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|bmp|webp)$/i
 
+/** First char must be a letter (any script) or digit; else treat as system/special dir. */
+const NORMAL_DIR_START = /^[\p{L}\p{N}]/u
+
 export interface ScannedImage {
   absolutePath: string
   relativePath: string
@@ -11,6 +14,15 @@ export interface ScannedImage {
 
 export function isImageFileName(name: string): boolean {
   return IMAGE_EXT.test(name)
+}
+
+/**
+ * Skip watch-tree dirs whose names start with a symbol
+ * (e.g. Synology `@Recycle`, `#recycle`, `$RECYCLE.BIN`, `.Trash`).
+ */
+export function shouldSkipWatchDir(name: string): boolean {
+  if (!name || name === '.' || name === '..') return true
+  return !NORMAL_DIR_START.test(name)
 }
 
 export function scanImageFiles(rootDir: string): ScannedImage[] {
@@ -36,6 +48,7 @@ function walk(rootDir: string, dir: string, out: ScannedImage[]): void {
       continue
     }
     if (st.isDirectory()) {
+      if (shouldSkipWatchDir(name)) continue
       walk(rootDir, full, out)
       continue
     }

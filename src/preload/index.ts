@@ -4,6 +4,7 @@ import {
   type IpcMethod,
   type IpcMethodMap,
   type IpcResponse,
+  type ShellEvent,
   type TaskProgressEvent
 } from '@shared/ipc'
 
@@ -34,6 +35,15 @@ const api = {
     ipcRenderer.on(IPC_CHANNELS.progress, handler)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.progress, handler)
+    }
+  },
+  onShellEvent(listener: (event: ShellEvent) => void): () => void {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ShellEvent): void => {
+      listener(payload)
+    }
+    ipcRenderer.on(IPC_CHANNELS.shell, handler)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.shell, handler)
     }
   }
 }

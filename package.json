@@ -1,6 +1,6 @@
 {
   "name": "ximgs",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "单机跨境图床：单机版本地目录定时同步上传（S3 兼容单桶）",
   "main": "./out/main/index.js",
   "author": "xImgs",

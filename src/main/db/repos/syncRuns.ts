@@ -122,12 +122,27 @@ export function purgeSyncRunsOlderThan(retentionDays = SYNC_RUN_RETENTION_DAYS):
   return count
 }
 
+export function countSyncRuns(): number {
+  const row = queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM sync_runs`)
+  return Number(row?.c ?? 0)
+}
+
+/** Delete all sync_runs rows (local history only; does not touch sync_files). */
+export function clearAllSyncRuns(): { deleted: number } {
+  const deleted = countSyncRuns()
+  if (deleted <= 0) return { deleted: 0 }
+  runSql(`DELETE FROM sync_runs`)
+  flushPersist()
+  return { deleted }
+}
+
 export function toSyncRunResult(run: SyncRunDto): SyncRunResult {
   return {
     scanned: run.scanned,
     uploaded: run.uploaded,
     skipped: run.skipped,
     failed: run.failed,
-    cancelled: run.cancelled
+    cancelled: run.cancelled,
+    paused: false
   }
 }

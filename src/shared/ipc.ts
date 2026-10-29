@@ -17,6 +17,7 @@ import type {
   UpdateAssetsInput,
   UpdateStoreInput
 } from './library'
+import type { DesktopPrefs, DesktopPrefsUpdate } from './desktop'
 import type { AppLocale } from './locale'
 import type {
   BindSkuImagesInput,
@@ -24,8 +25,10 @@ import type {
   SetSkuCoverInput,
   SkuDetailDto,
   SkuDto,
+  SkuImportResult,
   SkuListResult,
   UnbindSkuImageInput,
+  UnbindSkuImagesInput,
   UpdateSkuInput
 } from './sku'
 import type {
@@ -73,7 +76,8 @@ export interface TaskProgressEvent {
 
 export const IPC_CHANNELS = {
   invoke: 'ximgs:invoke',
-  progress: 'task:progress'
+  progress: 'task:progress',
+  shell: 'ximgs:shell'
 } as const
 
 export type IpcMethod =
@@ -82,6 +86,8 @@ export type IpcMethod =
   | 'system.ping'
   | 'system.getLocale'
   | 'system.setLocale'
+  | 'system.getDesktopPrefs'
+  | 'system.setDesktopPrefs'
   | 'system.saveTextFile'
   | 'db.getStatus'
   | 'library.getRoot'
@@ -114,6 +120,7 @@ export type IpcMethod =
   | 'sync.start'
   | 'sync.stop'
   | 'sync.cancel'
+  | 'sync.pause'
   | 'sync.runNow'
   | 'sync.listFiles'
   | 'sync.browseFiles'
@@ -123,12 +130,16 @@ export type IpcMethod =
   | 'sync.getChecklist'
   | 'sync.retryFailed'
   | 'sync.listRuns'
+  | 'sync.clearRuns'
   | 'sync.uploadSingle'
   | 'sync.uploadPaths'
   | 'sync.uploadClipboard'
   | 'sync.chooseImagePaths'
   | 'sync.chooseAndUpload'
   | 'sync.deleteFile'
+  | 'sync.restoreFile'
+  | 'sync.purgeFile'
+  | 'sync.getTrashCount'
   | 'sync.clearFiles'
   | 'sku.list'
   | 'sku.get'
@@ -137,7 +148,13 @@ export type IpcMethod =
   | 'sku.delete'
   | 'sku.bindImages'
   | 'sku.unbindImage'
+  | 'sku.unbindImages'
   | 'sku.setCover'
+  | 'sku.downloadImportTemplate'
+  | 'sku.importCsv'
+  | 'backup.exportPackage'
+  | 'backup.importPackage'
+  | 'backup.getGuide'
 
 export interface AppInfo {
   name: string
@@ -168,6 +185,8 @@ export type IpcMethodMap = {
   'system.ping': { req: void; res: { pong: true; at: string } }
   'system.getLocale': { req: void; res: { locale: AppLocale } }
   'system.setLocale': { req: { locale: AppLocale }; res: { locale: AppLocale } }
+  'system.getDesktopPrefs': { req: void; res: DesktopPrefs }
+  'system.setDesktopPrefs': { req: DesktopPrefsUpdate; res: DesktopPrefs }
   'system.saveTextFile': {
     req: {
       content: string
@@ -207,6 +226,7 @@ export type IpcMethodMap = {
   'sync.start': { req: void; res: SyncStatusDto }
   'sync.stop': { req: void; res: SyncStatusDto }
   'sync.cancel': { req: void; res: SyncStatusDto }
+  'sync.pause': { req: void; res: SyncStatusDto }
   'sync.runNow': { req: void; res: SyncRunResult }
   'sync.listFiles': { req: SyncFileQuery | void; res: SyncFileListResult }
   'sync.browseFiles': { req: SyncFileQuery | void; res: SyncBrowseResult }
@@ -216,6 +236,7 @@ export type IpcMethodMap = {
   'sync.getChecklist': { req: void; res: SyncSetupChecklist }
   'sync.retryFailed': { req: void; res: SyncRunResult }
   'sync.listRuns': { req: { limit?: number } | void; res: SyncRunListResult }
+  'sync.clearRuns': { req: void; res: { deleted: number; cancelled: boolean } }
   'sync.uploadSingle': {
     req: { filePath: string; folderPath?: string }
     res: SingleUploadResult
@@ -237,6 +258,9 @@ export type IpcMethodMap = {
     res: MultiUploadResult | null
   }
   'sync.deleteFile': { req: { id: number }; res: { deleted: boolean } }
+  'sync.restoreFile': { req: { id: number }; res: { restored: boolean } }
+  'sync.purgeFile': { req: { id: number }; res: { purged: boolean } }
+  'sync.getTrashCount': { req: void; res: { count: number } }
   'sync.clearFiles': { req: void; res: { deleted: number; cancelled: boolean } }
   'sku.list': { req: void; res: SkuListResult }
   'sku.get': { req: { id: number }; res: SkuDetailDto }
@@ -245,7 +269,22 @@ export type IpcMethodMap = {
   'sku.delete': { req: { id: number }; res: { ok: true } }
   'sku.bindImages': { req: BindSkuImagesInput; res: SkuDetailDto }
   'sku.unbindImage': { req: UnbindSkuImageInput; res: SkuDetailDto }
+  'sku.unbindImages': { req: UnbindSkuImagesInput; res: SkuDetailDto }
   'sku.setCover': { req: SetSkuCoverInput; res: SkuDetailDto }
+  'sku.downloadImportTemplate': {
+    req: void
+    res: { saved: boolean; path: string | null }
+  }
+  'sku.importCsv': { req: { filePath: string }; res: SkuImportResult }
+  'backup.exportPackage': {
+    req: void
+    res: { exported: boolean; path: string | null }
+  }
+  'backup.importPackage': {
+    req: void
+    res: { imported: boolean; path: string | null; restartRequired: boolean }
+  }
+  'backup.getGuide': { req: void; res: { text: string } }
 }
 
 export type InvokePayload = {
@@ -256,3 +295,4 @@ export type InvokePayload = {
 
 export type { AssetDto, AssetQuery, StoreDto, TagDto, ProductDto, ImportResult }
 export type { SyncConfigPublic, SyncStatusDto, SyncFileDto, SyncRunResult } from './sync'
+export type { DesktopPrefs, DesktopPrefsUpdate, ShellEvent } from './desktop'

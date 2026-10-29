@@ -266,6 +266,27 @@ svg {
   font-family: var(--mono);
 }
 
+.nav-item .nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #d7e4f8;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-item.active .nav-badge {
+  background: rgba(127, 176, 255, 0.28);
+  color: #fff;
+}
+
 .side-card {
   margin-top: 14px;
   padding: 11px 12px;
@@ -973,6 +994,16 @@ textarea.input {
   background: #fff;
   color: var(--text);
   box-shadow: var(--sh-1);
+}
+
+.seg button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.seg button.on:disabled {
+  opacity: 1;
+  cursor: default;
 }
 
 /* ---------- Table ---------- */

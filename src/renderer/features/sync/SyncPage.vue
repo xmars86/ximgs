@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import type { SyncProviderId } from '@shared/sync'
+import { parseAppDate } from '@shared/datetime'
 import { useSyncStore } from './useSyncStore'
 import UiIcon from '../../shared/ui/UiIcon.vue'
 
@@ -12,6 +13,7 @@ const sync = useSyncStore()
 const fileFilter = ref<'all' | 'error' | 'pending'>('all')
 const nowMs = ref(Date.now())
 let tickTimer: ReturnType<typeof setInterval> | null = null
+let lastDuePollAt = 0
 
 const form = reactive({
   intervalMinutes: 60,
@@ -61,12 +63,15 @@ const providerLabel = computed(() => {
   return t('sync.noBucketYet')
 })
 
+const nextScanRemainMs = computed(() => {
+  if (!sync.status?.isSchedulerRunning || !sync.status.nextDueAt) return null
+  return Math.max(0, new Date(sync.status.nextDueAt).getTime() - nowMs.value)
+})
+
 const nextScanLabel = computed(() => {
   if (statusKind.value === 'syncing') return `${progressPercent.value}%`
-  if (!sync.status?.isSchedulerRunning || !sync.status.lastRunAt) return '—'
-  const intervalMs = (sync.status.intervalMinutes || form.intervalMinutes) * 60_000
-  const nextAt = new Date(sync.status.lastRunAt).getTime() + intervalMs
-  const remain = Math.max(0, nextAt - nowMs.value)
+  const remain = nextScanRemainMs.value
+  if (remain == null) return '—'
   const mm = Math.floor(remain / 60_000)
   const ss = Math.floor((remain % 60_000) / 1000)
   return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
@@ -122,6 +127,18 @@ onMounted(async () => {
   hydrateForm()
   tickTimer = setInterval(() => {
     nowMs.value = Date.now()
+    // After interval change / tick fire, nextDueAt updates in main — pull when local clock hits 0
+    const remain = nextScanRemainMs.value
+    const now = Date.now()
+    if (
+      remain === 0 &&
+      sync.status?.isSchedulerRunning &&
+      !sync.isBusy &&
+      now - lastDuePollAt > 2000
+    ) {
+      lastDuePollAt = now
+      void sync.refreshStatus()
+    }
   }, 1000)
 })
 
@@ -148,6 +165,11 @@ async function savePolicy(): Promise<void> {
   })
 }
 
+function toggleAutoStart(): void {
+  form.autoStart = !form.autoStart
+  void savePolicy()
+}
+
 async function copyUrl(url: string): Promise<void> {
   await navigator.clipboard.writeText(url)
 }
@@ -172,7 +194,7 @@ function formatBytes(n: number | null): string {
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—'
-  const d = new Date(iso)
+  const d = parseAppDate(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString(locale.value, {
     month: '2-digit',
@@ -278,7 +300,16 @@ function goLogs(): void {
             {{ t('sync.retryFailed') }}
           </button>
           <button
-            v-if="!sync.isBusy"
+            v-if="!sync.isBusy && sync.status?.canResume"
+            type="button"
+            class="btn primary"
+            @click="sync.resume()"
+          >
+            <UiIcon name="play" :size="15" />
+            {{ t('sync.resume') }}
+          </button>
+          <button
+            v-else-if="!sync.isBusy"
             type="button"
             class="btn primary"
             @click="sync.runNow()"
@@ -286,8 +317,9 @@ function goLogs(): void {
             <UiIcon name="play" :size="15" />
             {{ t('sync.runNow') }}
           </button>
-          <button v-else type="button" class="btn danger" @click="sync.cancel()">
-            {{ t('sync.cancel') }}
+          <button v-else type="button" class="btn" @click="sync.pause()">
+            <UiIcon name="pause" :size="15" />
+            {{ t('sync.pause') }}
           </button>
         </template>
         <button v-else type="button" class="btn primary" @click="goSettings">
@@ -397,6 +429,9 @@ function goLogs(): void {
               <div class="card-hd">
                 <h2>{{ t('sync.lastSync') }}</h2>
                 <span v-if="statusKind === 'syncing'" class="badge brand">{{ t('sync.inProgress') }}</span>
+                <span v-else-if="last?.paused || sync.status?.canResume" class="badge mute">{{
+                  t('sync.paused')
+                }}</span>
                 <span v-else-if="last?.failed" class="badge err">{{ t('sync.partialFail') }}</span>
                 <span v-else-if="last" class="badge ok">{{ t('sync.completed') }}</span>
                 <span v-else class="badge mute">{{ t('sync.noRunYet') }}</span>
@@ -419,6 +454,9 @@ function goLogs(): void {
                     <template v-if="statusKind === 'syncing' && sync.progress">
                       {{ sync.progress.phase }} · {{ sync.progress.message }}
                     </template>
+                    <template v-else-if="last?.paused || sync.status?.canResume">{{
+                      t('sync.pausedCap')
+                    }}</template>
                     <template v-else-if="last?.cancelled">{{ t('sync.cancelledCap') }}</template>
                     <template v-else-if="last?.failed">
                       {{ t('sync.failedCap', { n: last.failed }) }}
@@ -552,7 +590,7 @@ function goLogs(): void {
                     class="switch"
                     :class="{ on: form.autoStart }"
                     :aria-pressed="form.autoStart"
-                    @click="form.autoStart = !form.autoStart; savePolicy()"
+                    @click="toggleAutoStart"
                   />
                 </div>
               </div>

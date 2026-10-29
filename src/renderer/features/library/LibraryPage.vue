@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import type { SyncFileDto, SyncFileStatusCounts, SyncFolderDto } from '@shared/sync'
+import { parseAppDate } from '@shared/datetime'
 import { bridgeInvoke } from '../../shared/bridge/client'
 import { useSyncStore } from '../sync/useSyncStore'
 import { PAGE_SIZE_OPTIONS, useGalleryStore, type GalleryPageSize } from './useGalleryStore'
@@ -14,8 +16,10 @@ type LinkFmt = 'url' | 'md' | 'html' | 'ubb'
 type SortKey = 'syncedAt' | 'name' | 'size'
 
 const { t, locale } = useI18n()
+const route = useRoute()
 const gallery = useGalleryStore()
 const sync = useSyncStore()
+const isTrashRoute = computed(() => route.name === 'trash')
 const searchDraft = ref('')
 const treeSearchDraft = ref('')
 const viewMode = ref<ViewMode>('tree')
@@ -116,19 +120,59 @@ const selectedItem = computed(() => {
 
 const explorerItemCount = computed(() => gallery.folders.length + gallery.items.length)
 
+/** Left tree root badge: active library totals vs recycle-bin total. */
+const treeRootCount = computed(() =>
+  gallery.scope === 'trash' ? gallery.trashCount : statusCounts.value.all
+)
+
+async function syncScopeFromRoute(): Promise<void> {
+  selectedId.value = null
+  pathHistory.value = []
+  clearTreeCache()
+  if (isTrashRoute.value) {
+    viewMode.value = 'tree'
+    if (gallery.scope !== 'trash') await gallery.openTrash()
+    else await gallery.refresh()
+    await ensureTreeChildren('')
+  } else if (gallery.scope === 'trash') {
+    await gallery.closeTrash()
+    if (viewMode.value === 'tree') {
+      await gallery.setListingMode('folder')
+      await ensureTreeChildren('')
+    }
+  } else {
+    await gallery.refresh()
+    if (viewMode.value === 'tree') await ensureTreeChildren('')
+  }
+}
+
 onMounted(async () => {
   searchDraft.value = gallery.search
-  if (viewMode.value === 'tree') {
+  if (isTrashRoute.value) {
+    viewMode.value = 'tree'
+  } else if (viewMode.value === 'tree') {
     await gallery.setListingMode('folder')
     treeExpanded[''] = true
   }
-  await Promise.all([sync.refreshAll().catch(() => undefined), gallery.refresh(), refreshCounts()])
-  await ensureTreeChildren('')
+  await sync.refreshAll().catch(() => undefined)
+  await syncScopeFromRoute()
+  await refreshCounts()
+  if (viewMode.value === 'tree') await ensureTreeChildren('')
 })
 
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
 })
+
+watch(
+  () => route.name,
+  () => {
+    void (async () => {
+      await syncScopeFromRoute()
+      await refreshCounts()
+    })()
+  }
+)
 
 watch(
   () => gallery.statusFilter,
@@ -153,6 +197,10 @@ watch(
 )
 
 watch(viewMode, async (mode) => {
+  if (isTrashRoute.value && mode !== 'tree') {
+    viewMode.value = 'tree'
+    return
+  }
   selectedId.value = null
   if (mode === 'tree') {
     await gallery.setListingMode('folder')
@@ -172,7 +220,9 @@ async function refreshCounts(): Promise<void> {
 }
 
 async function refreshAll(): Promise<void> {
+  clearTreeCache()
   await Promise.all([gallery.refresh(), refreshCounts()])
+  if (viewMode.value === 'tree') await ensureTreeChildren('')
 }
 
 async function onPageSizeChange(event: Event): Promise<void> {
@@ -207,7 +257,7 @@ function formatBytes(n: number | null): string {
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—'
-  const d = new Date(iso)
+  const d = parseAppDate(iso)
   if (Number.isNaN(d.getTime())) return iso
   const now = new Date()
   const sameDay =
@@ -230,7 +280,7 @@ function formatTime(iso: string | null): string {
 
 function formatExplorerDate(iso: string | null): string {
   if (!iso) return '—'
-  const d = new Date(iso)
+  const d = parseAppDate(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString(locale.value, {
     year: 'numeric',
@@ -240,6 +290,10 @@ function formatExplorerDate(iso: string | null): string {
     minute: '2-digit',
     hour12: false
   })
+}
+
+function previewSrc(item: { publicUrl?: string | null; thumbLocalPath?: string | null }): string | null {
+  return item.thumbLocalPath || item.publicUrl || null
 }
 
 function shortUrl(url: string | null): string {
@@ -294,16 +348,31 @@ async function openFolderRow(path: string): Promise<void> {
   await navigateTo(path, true)
 }
 
+function clearTreeCache(): void {
+  for (const key of Object.keys(treeChildren)) delete treeChildren[key]
+  for (const key of Object.keys(treeLoading)) delete treeLoading[key]
+  for (const key of Object.keys(treeExpanded)) {
+    if (key !== '') delete treeExpanded[key]
+  }
+  treeExpanded[''] = true
+}
+
+function treeCacheKey(path: string): string {
+  // Scope-prefix so library ↔ trash never share stale folder counts.
+  return `${gallery.scope}:${path || ''}`
+}
+
 async function ensureTreeChildren(path: string): Promise<void> {
-  const key = path || ''
-  if (treeChildren[key] || treeLoading[key]) return
+  const key = treeCacheKey(path)
+  if (treeChildren[key] !== undefined || treeLoading[key]) return
   treeLoading[key] = true
   try {
     const res = await bridgeInvoke('sync.browseFiles', {
       limit: 1,
       offset: 0,
-      pathPrefix: key || undefined,
-      status: gallery.statusFilter || undefined
+      pathPrefix: path || undefined,
+      status: gallery.scope === 'trash' ? undefined : gallery.statusFilter || undefined,
+      trashOnly: gallery.scope === 'trash'
     })
     treeChildren[key] = res.folders
   } catch {
@@ -335,6 +404,23 @@ async function onDelete(id: number): Promise<void> {
   if (gallery.preview?.id === id) gallery.preview = null
   if (selectedId.value === id) selectedId.value = null
   await refreshCounts()
+}
+
+async function onRestore(id: number): Promise<void> {
+  await gallery.restore(id)
+  if (gallery.preview?.id === id) gallery.preview = null
+  if (selectedId.value === id) selectedId.value = null
+  await refreshCounts()
+}
+
+async function onPurge(id: number): Promise<void> {
+  if (!window.confirm(t('library.confirmPurge'))) return
+  await gallery.purge(id)
+  if (gallery.preview?.id === id) gallery.preview = null
+  if (selectedId.value === id) selectedId.value = null
+  clearTreeCache()
+  await refreshCounts()
+  if (viewMode.value === 'tree') await ensureTreeChildren('')
 }
 
 async function copyText(text: string): Promise<void> {
@@ -448,7 +534,14 @@ function treeIndent(depth: number): string {
 const visibleTreeNodes = computed(() => {
   const out: { folder: SyncFolderDto; depth: number }[] = []
   function walk(parent: string, depth: number): void {
-    let kids = treeChildren[parent] || (parent === '' ? sortedFolders.value : [])
+    const cached = treeChildren[treeCacheKey(parent)]
+    // Prefer loaded tree cache; fall back to current browse folders only at root.
+    let kids =
+      cached !== undefined
+        ? cached
+        : parent === ''
+          ? sortedFolders.value
+          : []
     if (parent === '') {
       const query = treeSearchDraft.value.trim().toLocaleLowerCase(locale.value)
       if (query) {
@@ -469,8 +562,10 @@ const visibleTreeNodes = computed(() => {
   <div class="page-root">
     <div class="main-hd">
       <div>
-        <h1>{{ t('library.title') }}</h1>
-        <p class="sub">{{ subtitleText }}</p>
+        <h1>{{ gallery.scope === 'trash' ? t('library.trashTitle') : t('library.title') }}</h1>
+        <p class="sub">
+          {{ gallery.scope === 'trash' ? t('library.trashSubtitle') : subtitleText }}
+        </p>
       </div>
       <div class="hd-actions">
         <button type="button" class="btn" :disabled="gallery.isLoading" @click="refreshAll()">
@@ -478,6 +573,7 @@ const visibleTreeNodes = computed(() => {
           {{ t('library.rescan') }}
         </button>
         <button
+          v-if="gallery.scope !== 'trash'"
           type="button"
           class="btn"
           :disabled="gallery.isLoading"
@@ -487,6 +583,7 @@ const visibleTreeNodes = computed(() => {
           {{ t('library.exportLinks') }}
         </button>
         <button
+          v-if="gallery.scope !== 'trash'"
           type="button"
           class="btn primary"
           :disabled="gallery.isUploading"
@@ -511,7 +608,13 @@ const visibleTreeNodes = computed(() => {
           <div class="tree-summary">
             <UiIcon name="folder" :size="15" />
             <span class="mono">{{ displayPath }}</span>
-            <span class="badge mute">{{ t('library.itemsBadge', { n: statusCounts.all || gallery.total }) }}</span>
+            <span class="badge mute">
+              {{
+                t('library.itemsBadge', {
+                  n: gallery.scope === 'trash' ? gallery.trashCount : statusCounts.all || gallery.total
+                })
+              }}
+            </span>
           </div>
           <div class="files-search">
             <UiIcon name="search" :size="14" />
@@ -522,7 +625,7 @@ const visibleTreeNodes = computed(() => {
               :placeholder="t('library.searchPlaceholder')"
             />
           </div>
-          <div class="chips">
+          <div v-if="gallery.scope !== 'trash'" class="chips">
             <button
               v-for="chip in statusChips"
               :key="chip.value || 'all'"
@@ -536,21 +639,40 @@ const visibleTreeNodes = computed(() => {
             </button>
           </div>
           <div class="spacer" />
-          <select v-model="sortKey" class="select sort-select" style="width: 132px; height: 30px">
+          <select
+            v-if="gallery.scope !== 'trash'"
+            v-model="sortKey"
+            class="select sort-select"
+            style="width: 132px; height: 30px"
+          >
             <option value="syncedAt">{{ t('library.sortSynced') }}</option>
             <option value="name">{{ t('library.sortName') }}</option>
             <option value="size">{{ t('library.sortSize') }}</option>
           </select>
           <div class="seg">
-            <button type="button" :class="{ on: viewMode === 'grid' }" @click="viewMode = 'grid'">
+            <button
+              type="button"
+              :class="{ on: viewMode === 'grid' }"
+              :disabled="gallery.scope === 'trash'"
+              @click="viewMode = 'grid'"
+            >
               <UiIcon name="grid" :size="13" />
               {{ t('library.viewGrid') }}
             </button>
-            <button type="button" :class="{ on: viewMode === 'table' }" @click="viewMode = 'table'">
+            <button
+              type="button"
+              :class="{ on: viewMode === 'table' }"
+              :disabled="gallery.scope === 'trash'"
+              @click="viewMode = 'table'"
+            >
               <UiIcon name="table" :size="13" />
               {{ t('library.viewList') }}
             </button>
-            <button type="button" :class="{ on: viewMode === 'tree' }" @click="viewMode = 'tree'">
+            <button
+              type="button"
+              :class="{ on: viewMode === 'tree' }"
+              @click="viewMode = 'tree'"
+            >
               <UiIcon name="folder" :size="13" />
               {{ t('library.viewTree') }}
             </button>
@@ -560,10 +682,17 @@ const visibleTreeNodes = computed(() => {
         <!-- ===== Grid ===== -->
         <template v-if="viewMode === 'grid'">
           <div v-if="gallery.isEmpty" class="empty" style="padding: 64px 20px">
-            <div class="ico"><UiIcon name="image" :size="21" /></div>
-            <b>{{ t('library.empty') }}</b>
-            <p>{{ t('library.emptyHint') }}</p>
-            <button type="button" class="btn primary" @click="gallery.openUploadDialog()">
+            <div class="ico">
+              <UiIcon :name="gallery.scope === 'trash' ? 'trash' : 'image'" :size="21" />
+            </div>
+            <b>{{ gallery.scope === 'trash' ? t('library.emptyTrashList') : t('library.empty') }}</b>
+            <p>{{ gallery.scope === 'trash' ? t('library.emptyTrashHint') : t('library.emptyHint') }}</p>
+            <button
+              v-if="gallery.scope !== 'trash'"
+              type="button"
+              class="btn primary"
+              @click="gallery.openUploadDialog()"
+            >
               {{ t('library.uploadOne') }}
             </button>
           </div>
@@ -580,8 +709,8 @@ const visibleTreeNodes = computed(() => {
               >
                 <div class="img">
                   <img
-                    v-if="item.publicUrl"
-                    :src="item.publicUrl"
+                    v-if="previewSrc(item)"
+                    :src="previewSrc(item)!"
                     :alt="fileName(item.relativePath)"
                     loading="lazy"
                     referrerpolicy="no-referrer"
@@ -646,10 +775,17 @@ const visibleTreeNodes = computed(() => {
         <!-- ===== Table ===== -->
         <template v-else-if="viewMode === 'table'">
           <div v-if="gallery.isEmpty" class="empty" style="padding: 64px 20px">
-            <div class="ico"><UiIcon name="image" :size="21" /></div>
-            <b>{{ t('library.empty') }}</b>
-            <p>{{ t('library.emptyHint') }}</p>
-            <button type="button" class="btn primary" @click="gallery.openUploadDialog()">
+            <div class="ico">
+              <UiIcon :name="gallery.scope === 'trash' ? 'trash' : 'image'" :size="21" />
+            </div>
+            <b>{{ gallery.scope === 'trash' ? t('library.emptyTrashList') : t('library.empty') }}</b>
+            <p>{{ gallery.scope === 'trash' ? t('library.emptyTrashHint') : t('library.emptyHint') }}</p>
+            <button
+              v-if="gallery.scope !== 'trash'"
+              type="button"
+              class="btn primary"
+              @click="gallery.openUploadDialog()"
+            >
               {{ t('library.uploadOne') }}
             </button>
           </div>
@@ -679,9 +815,9 @@ const visibleTreeNodes = computed(() => {
                     <td>
                       <div class="t-file">
                         <img
-                          v-if="item.publicUrl"
+                          v-if="previewSrc(item)"
                           class="thumb"
-                          :src="item.publicUrl"
+                          :src="previewSrc(item)!"
                           alt=""
                           loading="lazy"
                           referrerpolicy="no-referrer"
@@ -833,7 +969,7 @@ const visibleTreeNodes = computed(() => {
                     ? fileName(sync.config.watchFolder.replace(/\\/g, '/'))
                     : t('library.rootFolder')
                 }}</span>
-                <span class="ct">{{ statusCounts.all }}</span>
+                <span class="ct">{{ treeRootCount }}</span>
               </div>
               <div
                 v-for="node in visibleTreeNodes"
@@ -898,8 +1034,8 @@ const visibleTreeNodes = computed(() => {
                   >
                     <div class="ex-image">
                       <img
-                        v-if="item.publicUrl"
-                        :src="item.publicUrl"
+                        v-if="previewSrc(item)"
+                        :src="previewSrc(item)!"
                         :alt="fileName(item.relativePath)"
                         loading="lazy"
                         referrerpolicy="no-referrer"
@@ -986,8 +1122,8 @@ const visibleTreeNodes = computed(() => {
         <div class="drawer-bd lib-drawer-bd">
           <div class="drawer-preview">
             <img
-              v-if="gallery.preview.publicUrl"
-              :src="gallery.preview.publicUrl"
+              v-if="previewSrc(gallery.preview)"
+              :src="previewSrc(gallery.preview)!"
               :alt="fileName(gallery.preview.relativePath)"
               referrerpolicy="no-referrer"
             />
@@ -1057,7 +1193,20 @@ const visibleTreeNodes = computed(() => {
           </button>
         </div>
         <div class="drawer-ft">
-          <button type="button" class="btn danger" @click="onDelete(gallery.preview.id)">
+          <template v-if="gallery.scope === 'trash'">
+            <button type="button" class="btn" @click="onRestore(gallery.preview.id)">
+              {{ t('library.restore') }}
+            </button>
+            <button type="button" class="btn danger" @click="onPurge(gallery.preview.id)">
+              {{ t('library.purge') }}
+            </button>
+          </template>
+          <button
+            v-else
+            type="button"
+            class="btn danger"
+            @click="onDelete(gallery.preview.id)"
+          >
             {{ t('library.delete') }}
           </button>
           <div class="spacer" />

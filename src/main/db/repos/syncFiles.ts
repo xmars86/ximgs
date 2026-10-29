@@ -7,6 +7,9 @@ import type {
   SyncFolderDto
 } from '@shared/sync'
 
+const FILE_SELECT = `id, relative_path, md5, object_key, public_url, status, last_error, byte_size, synced_at, updated_at,
+  IFNULL(is_trashed, 0) AS is_trashed, trashed_at`
+
 function normalizePathPrefix(pathPrefix?: string): string {
   return (pathPrefix ?? '')
     .replace(/\\/g, '/')
@@ -18,9 +21,17 @@ function buildListWhere(options: {
   status?: string
   pathPrefix?: string
   directOnly?: boolean
+  trashOnly?: boolean
 }): { whereSql: string; params: unknown[] } {
   const where: string[] = []
   const params: unknown[] = []
+
+  if (options.trashOnly) {
+    where.push(`IFNULL(is_trashed, 0) = 1`)
+  } else {
+    where.push(`IFNULL(is_trashed, 0) = 0`)
+  }
+
   if (options.status) {
     where.push(`status = ?`)
     params.push(options.status)
@@ -36,7 +47,6 @@ function buildListWhere(options: {
   const prefix = normalizePathPrefix(options.pathPrefix)
   if (options.directOnly) {
     if (prefix) {
-      // Direct children of prefix: prefix/name with no further slash
       where.push(`relative_path LIKE ?`)
       params.push(`${prefix}/%`)
       where.push(`instr(substr(relative_path, ?), '/') = 0`)
@@ -66,6 +76,8 @@ interface RawRow {
   byte_size: number | null
   synced_at: string | null
   updated_at: string
+  is_trashed: number
+  trashed_at: string | null
 }
 
 function mapRow(row: RawRow): SyncFileDto {
@@ -79,14 +91,15 @@ function mapRow(row: RawRow): SyncFileDto {
     lastError: row.last_error == null ? null : String(row.last_error),
     byteSize: row.byte_size == null ? null : Number(row.byte_size),
     syncedAt: row.synced_at == null ? null : String(row.synced_at),
-    updatedAt: String(row.updated_at)
+    updatedAt: String(row.updated_at),
+    isTrashed: Number(row.is_trashed) === 1,
+    trashedAt: row.trashed_at == null ? null : String(row.trashed_at)
   }
 }
 
 export function findSyncFileByPath(relativePath: string): SyncFileDto | undefined {
   const row = queryOne<RawRow>(
-    `SELECT id, relative_path, md5, object_key, public_url, status, last_error, byte_size, synced_at, updated_at
-     FROM sync_files WHERE relative_path = ?`,
+    `SELECT ${FILE_SELECT} FROM sync_files WHERE relative_path = ?`,
     [relativePath]
   )
   return row ? mapRow(row) : undefined
@@ -94,8 +107,9 @@ export function findSyncFileByPath(relativePath: string): SyncFileDto | undefine
 
 export function findSyncedByMd5(md5: string): SyncFileDto | undefined {
   const row = queryOne<RawRow>(
-    `SELECT id, relative_path, md5, object_key, public_url, status, last_error, byte_size, synced_at, updated_at
-     FROM sync_files WHERE md5 = ? AND status = 'synced' AND public_url IS NOT NULL
+    `SELECT ${FILE_SELECT}
+     FROM sync_files
+     WHERE md5 = ? AND status = 'synced' AND public_url IS NOT NULL AND IFNULL(is_trashed, 0) = 0
      ORDER BY id DESC LIMIT 1`,
     [md5]
   )
@@ -103,20 +117,58 @@ export function findSyncedByMd5(md5: string): SyncFileDto | undefined {
 }
 
 export function getSyncFileById(id: number): SyncFileDto | undefined {
-  const row = queryOne<RawRow>(
-    `SELECT id, relative_path, md5, object_key, public_url, status, last_error, byte_size, synced_at, updated_at
-     FROM sync_files WHERE id = ?`,
-    [id]
-  )
+  const row = queryOne<RawRow>(`SELECT ${FILE_SELECT} FROM sync_files WHERE id = ?`, [id])
   return row ? mapRow(row) : undefined
 }
 
-export function deleteSyncFileById(id: number): boolean {
+/** Soft-delete into recycle bin. Does not touch disk or remote objects. */
+export function trashSyncFileById(id: number): boolean {
+  const existing = getSyncFileById(id)
+  if (!existing || existing.isTrashed) return false
+  runSql(
+    `UPDATE sync_files
+     SET is_trashed = 1, trashed_at = datetime('now'), updated_at = datetime('now')
+     WHERE id = ?`,
+    [id]
+  )
+  persistDatabase()
+  return true
+}
+
+export function restoreSyncFileById(id: number): boolean {
+  const existing = getSyncFileById(id)
+  if (!existing || !existing.isTrashed) return false
+  runSql(
+    `UPDATE sync_files
+     SET is_trashed = 0, trashed_at = NULL, updated_at = datetime('now')
+     WHERE id = ?`,
+    [id]
+  )
+  persistDatabase()
+  return true
+}
+
+/** Permanent delete of DB row (CASCADE sku_images). Caller owns remote/local file deletion. */
+export function purgeSyncFileById(id: number): boolean {
   const existing = getSyncFileById(id)
   if (!existing) return false
+  if (!existing.isTrashed) return false
   runSql(`DELETE FROM sync_files WHERE id = ?`, [id])
   persistDatabase()
   return true
+}
+
+/** @deprecated Prefer trashSyncFileById for gallery delete. */
+export function deleteSyncFileById(id: number): boolean {
+  return trashSyncFileById(id)
+}
+
+export function countTrashedSyncFiles(): number {
+  return Number(
+    queryOne<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM sync_files WHERE IFNULL(is_trashed, 0) = 1`
+    )?.count ?? 0
+  )
 }
 
 /** Clears all local sync/gallery file rows. Does not delete remote objects. */
@@ -149,6 +201,7 @@ export function upsertSyncedFile(input: {
 }): void {
   const existing = findSyncFileByPath(input.relativePath)
   if (existing) {
+    // Preserve is_trashed so a recycled path does not reappear in the gallery on resync.
     runSql(
       `UPDATE sync_files SET
         md5 = ?, object_key = ?, public_url = ?, status = ?, last_error = ?,
@@ -208,6 +261,7 @@ export function listSyncFiles(
     status?: string
     pathPrefix?: string
     directOnly?: boolean
+    trashOnly?: boolean
   } = {}
 ): SyncFileListResult {
   const { whereSql, params } = buildListWhere(options)
@@ -217,11 +271,14 @@ export function listSyncFiles(
       params
     )?.count ?? 0
   )
+  const orderBy = options.trashOnly
+    ? `ORDER BY trashed_at DESC, id DESC`
+    : `ORDER BY updated_at DESC, id DESC`
   const rows = queryAll<RawRow>(
-    `SELECT id, relative_path, md5, object_key, public_url, status, last_error, byte_size, synced_at, updated_at
+    `SELECT ${FILE_SELECT}
      FROM sync_files
      ${whereSql}
-     ORDER BY updated_at DESC, id DESC
+     ${orderBy}
      LIMIT ? OFFSET ?`,
     [...params, Math.min(Math.max(limit, 1), 500), Math.max(offset, 0)]
   )
@@ -232,18 +289,20 @@ export function listSyncFiles(
 export function browseSyncFiles(
   limit = 500,
   offset = 0,
-  options: { search?: string; status?: string; pathPrefix?: string } = {}
+  options: { search?: string; status?: string; pathPrefix?: string; trashOnly?: boolean } = {}
 ): SyncBrowseResult {
   const pathPrefix = normalizePathPrefix(options.pathPrefix)
   const searching = Boolean(options.search?.trim())
+  const trashOnly = options.trashOnly === true
 
-  // Text search: flat results under current prefix (or whole library).
+  // Text search: flat results under current prefix (library or trash).
   if (searching) {
     const listed = listSyncFiles(limit, offset, {
       search: options.search,
       status: options.status,
       pathPrefix: pathPrefix || undefined,
-      directOnly: false
+      directOnly: false,
+      trashOnly
     })
     return {
       pathPrefix,
@@ -253,11 +312,12 @@ export function browseSyncFiles(
     }
   }
 
-  const folders = listChildFolders(pathPrefix, options.status)
+  const folders = listChildFolders(pathPrefix, options.status, trashOnly)
   const listed = listSyncFiles(limit, offset, {
     status: options.status,
     pathPrefix,
-    directOnly: true
+    directOnly: true,
+    trashOnly
   })
   return {
     pathPrefix,
@@ -267,8 +327,14 @@ export function browseSyncFiles(
   }
 }
 
-function listChildFolders(pathPrefix: string, status?: string): SyncFolderDto[] {
-  const where: string[] = []
+function listChildFolders(
+  pathPrefix: string,
+  status?: string,
+  trashOnly = false
+): SyncFolderDto[] {
+  const where: string[] = [
+    trashOnly ? `IFNULL(is_trashed, 0) = 1` : `IFNULL(is_trashed, 0) = 0`
+  ]
   const params: unknown[] = []
   if (status) {
     where.push(`status = ?`)
@@ -280,7 +346,7 @@ function listChildFolders(pathPrefix: string, status?: string): SyncFolderDto[] 
   } else {
     where.push(`instr(relative_path, '/') > 0`)
   }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const whereSql = `WHERE ${where.join(' AND ')}`
   const rows = queryAll<{ relative_path: string }>(
     `SELECT relative_path FROM sync_files ${whereSql}`,
     params
@@ -309,14 +375,18 @@ function listChildFolders(pathPrefix: string, status?: string): SyncFolderDto[] 
 
 export function listFailedRelativePaths(): string[] {
   const rows = queryAll<{ relative_path: string }>(
-    `SELECT relative_path FROM sync_files WHERE status = 'error' ORDER BY updated_at DESC`
+    `SELECT relative_path FROM sync_files
+     WHERE status = 'error' AND IFNULL(is_trashed, 0) = 0
+     ORDER BY updated_at DESC`
   )
   return rows.map((r) => String(r.relative_path))
 }
 
 export function countByStatus(): Record<string, number> {
   const rows = queryAll<{ status: string; count: number }>(
-    `SELECT status, COUNT(*) AS count FROM sync_files GROUP BY status`
+    `SELECT status, COUNT(*) AS count FROM sync_files
+     WHERE IFNULL(is_trashed, 0) = 0
+     GROUP BY status`
   )
   const out: Record<string, number> = {}
   for (const row of rows) {
@@ -327,7 +397,8 @@ export function countByStatus(): Record<string, number> {
 
 export function sumSyncedBytes(): number {
   const row = queryOne<{ total: number | null }>(
-    `SELECT SUM(byte_size) AS total FROM sync_files WHERE status = 'synced'`
+    `SELECT SUM(byte_size) AS total FROM sync_files
+     WHERE status = 'synced' AND IFNULL(is_trashed, 0) = 0`
   )
   return Number(row?.total ?? 0) || 0
 }
@@ -343,6 +414,7 @@ export function countSyncedUploadsByLocalDay(dayCount = 7): Record<string, numbe
     `SELECT date(synced_at, 'localtime') AS day, COUNT(*) AS count
      FROM sync_files
      WHERE status = 'synced'
+       AND IFNULL(is_trashed, 0) = 0
        AND synced_at IS NOT NULL
        AND datetime(synced_at) >= datetime('now', ?)
      GROUP BY date(synced_at, 'localtime')`,

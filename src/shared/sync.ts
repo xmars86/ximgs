@@ -47,6 +47,11 @@ export interface SyncFileDto {
   byteSize: number | null
   syncedAt: string | null
   updatedAt: string
+  /** Soft-deleted into gallery recycle bin. */
+  isTrashed: boolean
+  trashedAt: string | null
+  /** Client team-cache local thumb path (main process); never remote bytes. */
+  thumbLocalPath?: string | null
 }
 
 export interface SyncRunResult {
@@ -55,6 +60,8 @@ export interface SyncRunResult {
   skipped: number
   failed: number
   cancelled: boolean
+  /** Stopped between files; next runNow continues via MD5 skip (no multipart resume). */
+  paused: boolean
 }
 
 /** How a sync batch was started. */
@@ -87,8 +94,12 @@ export const SYNC_RUN_RETENTION_DAYS = 90
 export interface SyncStatusDto {
   isSchedulerRunning: boolean
   isRunInProgress: boolean
+  /** True after a cooperative pause; 继续 / runNow clears it. */
+  canResume: boolean
   intervalMinutes: number
   watchFolder: string | null
+  /** ISO time when the next scheduled tick is due (set when scheduler starts / fires). */
+  nextDueAt: string | null
   lastRunAt: string | null
   lastResult: SyncRunResult | null
   lastError: string | null
@@ -139,6 +150,8 @@ export interface SyncFileQuery {
    * (not nested). Folders are returned separately via sync.browseFiles.
    */
   directOnly?: boolean
+  /** When true, list only recycle-bin rows; default excludes trashed. */
+  trashOnly?: boolean
 }
 
 export interface SyncFolderDto {

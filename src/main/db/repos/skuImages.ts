@@ -24,7 +24,7 @@ function mapImage(row: SkuImageRow): SkuImageDto {
 const IMAGE_SELECT = `
   SELECT si.id, si.sync_file_id, sf.relative_path, sf.public_url, si.is_cover, si.sort_order
   FROM sku_images si
-  INNER JOIN sync_files sf ON sf.id = si.sync_file_id
+  INNER JOIN sync_files sf ON sf.id = si.sync_file_id AND IFNULL(sf.is_trashed, 0) = 0
 `
 
 export function listImagesBySku(skuId: number): SkuImageDto[] {
@@ -39,7 +39,10 @@ export function listImagesBySku(skuId: number): SkuImageDto[] {
 export function countImagesBySku(skuId: number): number {
   return Number(
     queryOne<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM sku_images WHERE sku_id = ?`,
+      `SELECT COUNT(*) AS count
+       FROM sku_images si
+       INNER JOIN sync_files sf ON sf.id = si.sync_file_id AND IFNULL(sf.is_trashed, 0) = 0
+       WHERE si.sku_id = ?`,
       [skuId]
     )?.count ?? 0
   )
@@ -61,7 +64,7 @@ export function getCoverUrl(skuId: number): string | null {
   const row = queryOne<{ public_url: string | null }>(
     `SELECT sf.public_url
      FROM sku_images si
-     INNER JOIN sync_files sf ON sf.id = si.sync_file_id
+     INNER JOIN sync_files sf ON sf.id = si.sync_file_id AND IFNULL(sf.is_trashed, 0) = 0
      WHERE si.sku_id = ? AND si.is_cover = 1
      LIMIT 1`,
     [skuId]
@@ -120,6 +123,14 @@ export interface SkuListRow {
   sku: string
   name: string
   note: string | null
+  category: string | null
+  brand: string | null
+  barcode: string | null
+  length_cm: number | null
+  width_cm: number | null
+  height_cm: number | null
+  gross_weight_kg: number | null
+  net_weight_kg: number | null
   created_at: string
   updated_at: string
   cover_url: string | null
@@ -129,16 +140,21 @@ export interface SkuListRow {
 export function listSkusWithCover(): SkuListRow[] {
   return queryAll<SkuListRow>(
     `SELECT
-       s.id, s.sku, s.name, s.note, s.created_at, s.updated_at,
+       s.id, s.sku, s.name, s.note, s.category, s.brand, s.barcode,
+       s.length_cm, s.width_cm, s.height_cm, s.gross_weight_kg, s.net_weight_kg,
+       s.created_at, s.updated_at,
        (
          SELECT sf.public_url
          FROM sku_images si
-         INNER JOIN sync_files sf ON sf.id = si.sync_file_id
+         INNER JOIN sync_files sf ON sf.id = si.sync_file_id AND IFNULL(sf.is_trashed, 0) = 0
          WHERE si.sku_id = s.id AND si.is_cover = 1
          LIMIT 1
        ) AS cover_url,
        (
-         SELECT COUNT(*) FROM sku_images si2 WHERE si2.sku_id = s.id
+         SELECT COUNT(*)
+         FROM sku_images si2
+         INNER JOIN sync_files sf2 ON sf2.id = si2.sync_file_id AND IFNULL(sf2.is_trashed, 0) = 0
+         WHERE si2.sku_id = s.id
        ) AS image_count
      FROM skus s
      ORDER BY s.sku COLLATE NOCASE`

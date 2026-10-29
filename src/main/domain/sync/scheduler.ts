@@ -11,6 +11,7 @@ import type { SyncRunResult, SyncRunTrigger } from '@shared/sync'
 import {
   isSyncRunInProgress,
   requestCancelSyncRun,
+  requestPauseSyncRun,
   runSyncOnce,
   runSyncRetryFailed
 } from './runner'
@@ -19,10 +20,18 @@ let timer: ReturnType<typeof setInterval> | null = null
 let lastRunAt: string | null = null
 let lastResult: SyncRunResult | null = null
 let lastError: string | null = null
+/** After cooperative pause; cleared when a new run starts or cancel is requested. */
+let canResume = false
+/** When the next setInterval tick is expected (ISO). Cleared when stopped. */
+let nextDueAt: string | null = null
 let hydrated = false
 
 export function isSchedulerRunning(): boolean {
   return timer !== null
+}
+
+function armNextDue(intervalMs: number, fromMs = Date.now()): void {
+  nextDueAt = new Date(fromMs + intervalMs).toISOString()
 }
 
 export function getSchedulerSnapshot() {
@@ -31,28 +40,43 @@ export function getSchedulerSnapshot() {
   return {
     isSchedulerRunning: timer !== null,
     isRunInProgress: isSyncRunInProgress(),
+    canResume,
     intervalMinutes: settings.intervalMinutes,
     watchFolder: settings.watchFolder,
+    nextDueAt: timer !== null ? nextDueAt : null,
     lastRunAt,
     lastResult,
     lastError
   }
 }
 
+/** Clears in-memory last-run fields after sync_runs table is wiped. */
+export function clearLastRunSnapshot(): void {
+  lastRunAt = null
+  lastResult = null
+  lastError = null
+  canResume = false
+  hydrated = true
+}
+
 export function startScheduler(): void {
   const settings = getSyncSettings()
   stopScheduler()
   const ms = settings.intervalMinutes * 60 * 1000
+  armNextDue(ms)
   timer = setInterval(() => {
+    const periodMs = getSyncSettings().intervalMinutes * 60 * 1000
+    armNextDue(periodMs)
     void tick()
   }, ms)
-  log.info('Sync scheduler started', { intervalMinutes: settings.intervalMinutes })
+  log.info('Sync scheduler started', { intervalMinutes: settings.intervalMinutes, nextDueAt })
 }
 
 export function stopScheduler(): void {
   if (timer) {
     clearInterval(timer)
     timer = null
+    nextDueAt = null
     log.info('Sync scheduler stopped')
   }
 }
@@ -73,7 +97,17 @@ async function tick(): Promise<void> {
 export function cancelRunTracked(): ReturnType<typeof getSchedulerSnapshot> {
   if (isSyncRunInProgress()) {
     requestCancelSyncRun()
+    canResume = false
     log.info('Sync run cancel requested')
+  }
+  return getSchedulerSnapshot()
+}
+
+/** Request cooperative pause; remaining files can be continued via runNow (MD5 skip). */
+export function pauseRunTracked(): ReturnType<typeof getSchedulerSnapshot> {
+  if (isSyncRunInProgress()) {
+    requestPauseSyncRun()
+    log.info('Sync run pause requested')
   }
   return getSchedulerSnapshot()
 }
@@ -93,11 +127,13 @@ async function runTracked(
   const taskId = `sync-${trigger}-${Date.now().toString(36)}`
   const startedAt = new Date().toISOString()
   lastError = null
+  canResume = false
   try {
     const result = await exec(taskId)
     const finishedAt = new Date().toISOString()
     lastResult = result
     lastRunAt = finishedAt
+    canResume = Boolean(result.paused)
     persistRun({
       taskId,
       trigger,
@@ -113,6 +149,7 @@ async function runTracked(
     lastError = message
     lastRunAt = finishedAt
     lastResult = null
+    canResume = false
     persistRun({
       taskId,
       trigger,
@@ -128,7 +165,8 @@ async function runTracked(
         uploaded: 0,
         skipped: 0,
         failed: 0,
-        cancelled: false
+        cancelled: false,
+        paused: false
       }
     }
     throw error

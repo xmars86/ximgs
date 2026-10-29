@@ -216,5 +216,34 @@ CREATE TABLE IF NOT EXISTS sync_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_runs_finished ON sync_runs(finished_at DESC);
 `
+  },
+  {
+    version: 7,
+    name: '007_sku_attrs',
+    sql: `
+ALTER TABLE skus ADD COLUMN category TEXT;
+ALTER TABLE skus ADD COLUMN length_cm REAL;
+ALTER TABLE skus ADD COLUMN width_cm REAL;
+ALTER TABLE skus ADD COLUMN height_cm REAL;
+ALTER TABLE skus ADD COLUMN gross_weight_kg REAL;
+`
+  },
+  {
+    version: 8,
+    name: '008_sku_brand_barcode_net',
+    sql: `
+ALTER TABLE skus ADD COLUMN brand TEXT;
+ALTER TABLE skus ADD COLUMN barcode TEXT;
+ALTER TABLE skus ADD COLUMN net_weight_kg REAL;
+`
+  },
+  {
+    version: 9,
+    name: '009_sync_files_trash',
+    sql: `
+ALTER TABLE sync_files ADD COLUMN is_trashed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_files ADD COLUMN trashed_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_sync_files_trashed ON sync_files(is_trashed, trashed_at);
+`
   }
 ]

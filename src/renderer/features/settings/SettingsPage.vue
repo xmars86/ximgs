@@ -9,7 +9,9 @@ import {
   deriveRegionalPublicBase,
   isRegionalProvider
 } from '@shared/regional'
+import type { DesktopPrefs } from '@shared/desktop'
 import type { SyncProviderId } from '@shared/sync'
+import { bridgeInvoke } from '../../shared/bridge/client'
 import { useBridgeStore } from '../../shared/bridge/useBridgeStore'
 import { useLocale } from '../../shared/i18n/useLocale'
 import { toast } from '../../shared/ui/useToast'
@@ -28,6 +30,7 @@ const panel = ref<'general' | 'storage' | 'sync' | 'security' | 'about'>('genera
 const testOk = ref(false)
 const dirty = ref(false)
 const hydrating = ref(false)
+const backupGuide = ref('')
 const datePreview = computed(() =>
   new Date(2026, 9, 27, 14, 2).toLocaleString(locale.value, {
     year: 'numeric',
@@ -51,6 +54,77 @@ const form = reactive({
   accessKeyId: '',
   sseMode: '' as '' | 'AES256'
 })
+
+const desktop = reactive<Pick<DesktopPrefs, 'closeToTray' | 'openAtLogin' | 'startHidden'>>({
+  closeToTray: true,
+  openAtLogin: false,
+  startHidden: false
+})
+const desktopHydrating = ref(false)
+
+async function loadDesktopPrefs(): Promise<void> {
+  desktopHydrating.value = true
+  try {
+    const prefs = await bridgeInvoke('system.getDesktopPrefs')
+    desktop.closeToTray = prefs.closeToTray
+    desktop.openAtLogin = prefs.openAtLogin
+    desktop.startHidden = prefs.startHidden
+  } catch (error) {
+    toast.err(error instanceof Error ? error.message : String(error))
+  } finally {
+    desktopHydrating.value = false
+  }
+}
+
+async function exportBackup(): Promise<void> {
+  try {
+    const res = await bridgeInvoke('backup.exportPackage')
+    if (!res.exported || !res.path) return
+    toast.ok(t('settings.backupExported', { path: res.path }))
+  } catch (error) {
+    toast.err(error instanceof Error ? error.message : String(error))
+  }
+}
+
+async function importBackup(): Promise<void> {
+  try {
+    const res = await bridgeInvoke('backup.importPackage')
+    if (!res.imported) return
+    toast.ok(t('settings.backupImported'))
+  } catch (error) {
+    toast.err(error instanceof Error ? error.message : String(error))
+  }
+}
+
+async function loadBackupGuide(): Promise<void> {
+  try {
+    const res = await bridgeInvoke('backup.getGuide')
+    backupGuide.value = res.text
+  } catch {
+    backupGuide.value = ''
+  }
+}
+
+async function saveDesktopPrefs(
+  patch: Partial<Pick<DesktopPrefs, 'closeToTray' | 'openAtLogin' | 'startHidden'>>
+): Promise<void> {
+  if (desktopHydrating.value) return
+  try {
+    const prefs = await bridgeInvoke('system.setDesktopPrefs', patch)
+    desktop.closeToTray = prefs.closeToTray
+    desktop.openAtLogin = prefs.openAtLogin
+    desktop.startHidden = prefs.startHidden
+    toast.ok(t('settings.desktopSaved'))
+  } catch (error) {
+    toast.err(error instanceof Error ? error.message : String(error))
+    await loadDesktopPrefs()
+  }
+}
+
+function toggleDesktopPref(key: 'closeToTray' | 'openAtLogin' | 'startHidden'): void {
+  desktop[key] = !desktop[key]
+  void saveDesktopPrefs({ [key]: desktop[key] })
+}
 
 const derivedB2Endpoint = computed(() => {
   if (form.provider !== 'b2' || !form.region.trim()) return ''
@@ -147,7 +221,7 @@ onMounted(async () => {
   }
   await bridge.refreshShellStatus()
   await sync.refreshAll()
-  await hydrate()
+  await Promise.all([hydrate(), loadDesktopPrefs(), loadBackupGuide()])
 })
 
 watch(
@@ -363,6 +437,50 @@ async function copyAuthorEmail(): Promise<void> {
                 <div class="row" style="gap: 10px; flex-wrap: wrap">
                   <span class="badge mute">{{ datePreview }}</span>
                   <span class="muted" style="font-size: 11.5px">{{ t('settings.dateEnExample') }}</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="lbl">
+                  <b>{{ t('settings.desktopTitle') }}</b>
+                  <span>{{ t('settings.desktopHint') }}</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px; min-width: 0">
+                  <div class="switch-row" style="padding-top: 0">
+                    <div class="txt">
+                      <b>{{ t('settings.closeToTray') }}</b>
+                      <span>{{ t('settings.closeToTrayHint') }}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="switch"
+                      :class="{ on: desktop.closeToTray }"
+                      @click="toggleDesktopPref('closeToTray')"
+                    />
+                  </div>
+                  <div class="switch-row" style="padding-top: 0">
+                    <div class="txt">
+                      <b>{{ t('settings.openAtLogin') }}</b>
+                      <span>{{ t('settings.openAtLoginHint') }}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="switch"
+                      :class="{ on: desktop.openAtLogin }"
+                      @click="toggleDesktopPref('openAtLogin')"
+                    />
+                  </div>
+                  <div class="switch-row" style="padding-top: 0">
+                    <div class="txt">
+                      <b>{{ t('settings.startHidden') }}</b>
+                      <span>{{ t('settings.startHiddenHint') }}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="switch"
+                      :class="{ on: desktop.startHidden }"
+                      @click="toggleDesktopPref('startHidden')"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -636,7 +754,10 @@ async function copyAuthorEmail(): Promise<void> {
               </div>
             </div>
             <div class="set-foot">
-              <span class="tip">{{ t('settings.incrementalOnly') }}</span>
+              <div class="sync-rules tip">
+                <div>{{ t('settings.incrementalOnly') }}</div>
+                <div>{{ t('settings.ignoreSpecialDirs') }}</div>
+              </div>
               <div class="spacer" />
               <button type="button" class="btn primary" @click="saveSyncPolicy">
                 {{ t('settings.savePolicy') }}
@@ -765,6 +886,28 @@ async function copyAuthorEmail(): Promise<void> {
                   <div class="traits">{{ t('settings.productTraits') }}</div>
                 </div>
                 <span v-if="bridge.appInfo" class="ver">v{{ bridge.appInfo.version }}</span>
+              </div>
+              <div class="hr" />
+              <div class="form-row">
+                <div class="lbl">
+                  <b>{{ t('settings.backupTitle') }}</b>
+                  <span>{{ t('settings.backupHint') }}</span>
+                </div>
+                <div>
+                  <div class="row wrap" style="gap: 8px">
+                    <button type="button" class="btn" @click="exportBackup">
+                      {{ t('settings.backupExport') }}
+                    </button>
+                    <button type="button" class="btn" @click="importBackup">
+                      {{ t('settings.backupImport') }}
+                    </button>
+                  </div>
+                  <pre
+                    v-if="backupGuide"
+                    class="tip"
+                    style="margin-top: 10px; white-space: pre-wrap; font-family: inherit"
+                  >{{ backupGuide }}</pre>
+                </div>
               </div>
               <div class="hr" />
               <table style="width: 100%; border-collapse: collapse; font-size: 12px">

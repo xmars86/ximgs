@@ -23,6 +23,7 @@ import { assertReadyToSync } from './validate'
 
 let runInProgress = false
 let cancelRequested = false
+let pauseRequested = false
 
 export function isSyncRunInProgress(): boolean {
   return runInProgress
@@ -30,6 +31,31 @@ export function isSyncRunInProgress(): boolean {
 
 export function requestCancelSyncRun(): void {
   cancelRequested = true
+  pauseRequested = false
+}
+
+/** Cooperative pause between files (current upload still finishes). */
+export function requestPauseSyncRun(): void {
+  if (!runInProgress) return
+  pauseRequested = true
+  cancelRequested = false
+}
+
+function shouldStopBatch(): 'cancel' | 'pause' | null {
+  if (cancelRequested) return 'cancel'
+  if (pauseRequested) return 'pause'
+  return null
+}
+
+function emptyResult(): SyncRunResult {
+  return {
+    scanned: 0,
+    uploaded: 0,
+    skipped: 0,
+    failed: 0,
+    cancelled: false,
+    paused: false
+  }
 }
 
 async function uploadOne(
@@ -83,13 +109,8 @@ export async function runSyncOnce(taskId = `sync-${Date.now().toString(36)}`): P
 
   runInProgress = true
   cancelRequested = false
-  const result: SyncRunResult = {
-    scanned: 0,
-    uploaded: 0,
-    skipped: 0,
-    failed: 0,
-    cancelled: false
-  }
+  pauseRequested = false
+  const result = emptyResult()
 
   const ctx = createUploadContext(secret)
   try {
@@ -107,8 +128,13 @@ export async function runSyncOnce(taskId = `sync-${Date.now().toString(36)}`): P
     }
 
     for (let i = 0; i < files.length; i += 1) {
-      if (cancelRequested) {
+      const stop = shouldStopBatch()
+      if (stop === 'cancel') {
         result.cancelled = true
+        break
+      }
+      if (stop === 'pause') {
+        result.paused = true
         break
       }
       const file = files[i]!
@@ -133,7 +159,7 @@ export async function runSyncOnce(taskId = `sync-${Date.now().toString(36)}`): P
 
     emitTaskProgress({
       taskId,
-      phase: result.cancelled ? 'cancelled' : 'done',
+      phase: result.cancelled ? 'cancelled' : result.paused ? 'paused' : 'done',
       current: files.length,
       total: files.length,
       message: summarizeResult(result)
@@ -143,6 +169,7 @@ export async function runSyncOnce(taskId = `sync-${Date.now().toString(36)}`): P
     ctx.client.destroy()
     runInProgress = false
     cancelRequested = false
+    pauseRequested = false
   }
 }
 
@@ -162,26 +189,27 @@ export async function runSyncRetryFailed(
   }
 
   const failedPaths = listFailedRelativePaths()
-  const result: SyncRunResult = {
-    scanned: failedPaths.length,
-    uploaded: 0,
-    skipped: 0,
-    failed: 0,
-    cancelled: false
-  }
+  const result = emptyResult()
+  result.scanned = failedPaths.length
   if (failedPaths.length === 0) {
     return result
   }
 
   runInProgress = true
   cancelRequested = false
+  pauseRequested = false
   const ctx = createUploadContext(secret)
   const root = settings.watchFolder!
 
   try {
     for (let i = 0; i < failedPaths.length; i += 1) {
-      if (cancelRequested) {
+      const stop = shouldStopBatch()
+      if (stop === 'cancel') {
         result.cancelled = true
+        break
+      }
+      if (stop === 'pause') {
+        result.paused = true
         break
       }
       const relativePath = failedPaths[i]!
@@ -218,7 +246,7 @@ export async function runSyncRetryFailed(
 
     emitTaskProgress({
       taskId,
-      phase: result.cancelled ? 'cancelled' : 'done',
+      phase: result.cancelled ? 'cancelled' : result.paused ? 'paused' : 'done',
       current: failedPaths.length,
       total: failedPaths.length,
       message: summarizeResult(result)
@@ -228,6 +256,7 @@ export async function runSyncRetryFailed(
     ctx.client.destroy()
     runInProgress = false
     cancelRequested = false
+    pauseRequested = false
   }
 }
 
@@ -237,7 +266,9 @@ function summarizeResult(result: SyncRunResult): string {
     `skipped=${result.skipped}`,
     `failed=${result.failed}`
   ]
-  if (result.failed > 0) {
+  if (result.paused) {
+    parts.push('已暂停，可点击「继续」')
+  } else if (result.failed > 0) {
     parts.push('可点击「重试失败项」再次上传')
   }
   return parts.join(' ')

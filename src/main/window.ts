@@ -3,7 +3,12 @@ import { join } from 'node:path'
 import { log } from './runtime/logger'
 import { getAppIconPath } from './runtime/brand'
 
-export function createMainWindow(): BrowserWindow {
+export interface CreateMainWindowOptions {
+  /** When true, stay hidden after ready (tray / login-item start). */
+  startHidden?: boolean
+}
+
+export function createMainWindow(options: CreateMainWindowOptions = {}): BrowserWindow {
   const icon = getAppIconPath()
   const win = new BrowserWindow({
     width: 1280,
@@ -22,6 +27,10 @@ export function createMainWindow(): BrowserWindow {
   })
 
   win.on('ready-to-show', () => {
+    if (options.startHidden) {
+      log.info('Main window ready (start hidden → tray)')
+      return
+    }
     win.show()
   })
 

@@ -19,6 +19,9 @@ export const useGalleryStore = defineStore('gallery', () => {
    * folder = directory explorer (browse children of pathPrefix)
    */
   const listingMode = ref<'flat' | 'folder'>('flat')
+  /** library = normal gallery; trash = recycle bin. */
+  const scope = ref<'library' | 'trash'>('library')
+  const trashCount = ref(0)
   /** Target folder drafted in the upload dialog; empty = auto `images/yyyy/mm`. */
   const uploadFolder = ref('')
   const showUploadDialog = ref(false)
@@ -58,6 +61,15 @@ export const useGalleryStore = defineStore('gallery', () => {
     () => !isLoading.value && folders.value.length === 0 && items.value.length === 0
   )
 
+  async function refreshTrashCount(): Promise<void> {
+    try {
+      const res = await bridgeInvoke('sync.getTrashCount')
+      trashCount.value = res.count
+    } catch {
+      trashCount.value = 0
+    }
+  }
+
   async function refresh(): Promise<void> {
     isLoading.value = true
     errorMessage.value = null
@@ -65,8 +77,11 @@ export const useGalleryStore = defineStore('gallery', () => {
       const offset = (page.value - 1) * pageSize.value
       const status = statusFilter.value || undefined
       const searchQ = search.value.trim() || undefined
+      const trashOnly = scope.value === 'trash'
+      // Recycle bin always uses directory (folder) browse, same as library tree mode.
+      const useFolderBrowse = trashOnly || listingMode.value === 'folder'
 
-      if (listingMode.value === 'flat') {
+      if (!useFolderBrowse) {
         const res = await bridgeInvoke('sync.listFiles', {
           limit: pageSize.value,
           offset,
@@ -81,14 +96,17 @@ export const useGalleryStore = defineStore('gallery', () => {
           limit: pageSize.value,
           offset,
           search: searchQ,
-          status,
-          pathPrefix: pathPrefix.value || undefined
+          status: trashOnly ? undefined : status,
+          pathPrefix: pathPrefix.value || undefined,
+          trashOnly
         })
         pathPrefix.value = res.pathPrefix
         folders.value = res.folders
         items.value = res.items
         total.value = res.total
       }
+
+      await refreshTrashCount()
 
       const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value) || 1)
       if (page.value > maxPage) {
@@ -102,6 +120,22 @@ export const useGalleryStore = defineStore('gallery', () => {
     } finally {
       isLoading.value = false
     }
+  }
+
+  async function openTrash(): Promise<void> {
+    scope.value = 'trash'
+    listingMode.value = 'folder'
+    page.value = 1
+    pathPrefix.value = ''
+    statusFilter.value = ''
+    await refresh()
+  }
+
+  async function closeTrash(): Promise<void> {
+    scope.value = 'library'
+    page.value = 1
+    pathPrefix.value = ''
+    await refresh()
   }
 
   async function setListingMode(mode: 'flat' | 'folder'): Promise<void> {
@@ -298,16 +332,51 @@ export const useGalleryStore = defineStore('gallery', () => {
     try {
       const res = await bridgeInvoke('sync.deleteFile', { id })
       if (!res.deleted) {
-        errorMessage.value = '记录不存在或已删除'
+        errorMessage.value = '记录不存在或已在回收站'
         return
       }
       if (preview.value?.id === id) {
         preview.value = null
       }
-      infoMessage.value = '已从素材库移除（云端对象未删除）'
+      toast.ok('删除成功')
       await refresh()
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : String(error)
+      toast.err(errorMessage.value)
+    }
+  }
+
+  async function restore(id: number): Promise<void> {
+    errorMessage.value = null
+    try {
+      const res = await bridgeInvoke('sync.restoreFile', { id })
+      if (!res.restored) {
+        errorMessage.value = '记录不存在或不在回收站'
+        return
+      }
+      if (preview.value?.id === id) preview.value = null
+      toast.ok('已还原到素材库')
+      await refresh()
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : String(error)
+      toast.err(errorMessage.value)
+    }
+  }
+
+  async function purge(id: number): Promise<void> {
+    errorMessage.value = null
+    try {
+      const res = await bridgeInvoke('sync.purgeFile', { id })
+      if (!res.purged) {
+        errorMessage.value = '记录不存在或不在回收站'
+        return
+      }
+      if (preview.value?.id === id) preview.value = null
+      toast.ok('已彻底删除（云端源对象与本地）；若使用 CDN，公开链接可能仍短暂命中缓存')
+      await refresh()
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : String(error)
+      toast.err(errorMessage.value)
     }
   }
 
@@ -328,6 +397,8 @@ export const useGalleryStore = defineStore('gallery', () => {
     statusFilter,
     pathPrefix,
     listingMode,
+    scope,
+    trashCount,
     uploadFolder,
     showUploadDialog,
     page,
@@ -363,6 +434,11 @@ export const useGalleryStore = defineStore('gallery', () => {
     chooseAndUpload,
     uploadClipboard,
     remove,
+    restore,
+    purge,
+    openTrash,
+    closeTrash,
+    refreshTrashCount,
     copyUrl
   }
 })

@@ -764,22 +764,19 @@
 }
 
 .ex-gallery {
-  columns: 160px;
-  column-gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+  align-items: start;
+  align-content: start;
   padding: 14px;
-  height: auto;
   width: 100%;
 }
 
 .ex-folder-card,
 .ex-image-card {
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-  page-break-inside: avoid;
-  display: inline-block;
-  width: 100%;
-  margin: 0 0 14px;
-  vertical-align: top;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -908,8 +905,7 @@
 }
 
 .ex-gallery > .ex-empty {
-  column-span: all;
-  break-inside: avoid;
+  grid-column: 1 / -1;
 }
 
 .ex-head,
@@ -1275,6 +1271,13 @@
   border-top: 1px solid var(--line);
   background: var(--surface-2);
   border-radius: 0 0 var(--r-md) var(--r-md);
+}
+
+.sync-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .test-ok {

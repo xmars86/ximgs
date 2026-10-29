@@ -57,6 +57,16 @@ export const useSyncStore = defineStore('sync', () => {
     dailyStats.value = stats
   }
 
+  async function refreshStatus(): Promise<void> {
+    try {
+      const st = await bridgeInvoke('sync.getStatus')
+      status.value = st
+      lastRunResult.value = st.lastResult
+    } catch {
+      /* ignore transient poll errors */
+    }
+  }
+
   async function saveConfig(patch: SyncConfigUpdate): Promise<void> {
     errorMessage.value = null
     testMessage.value = null
@@ -90,18 +100,36 @@ export const useSyncStore = defineStore('sync', () => {
     errorMessage.value = null
     try {
       status.value = await bridgeInvoke('sync.start')
+      config.value = await bridgeInvoke('sync.getConfig')
+      toast.ok('定时同步已开启')
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : String(error)
+      const message = error instanceof Error ? error.message : String(error)
+      errorMessage.value = message
+      toast.err(message)
     }
   }
 
   async function stop(): Promise<void> {
-    status.value = await bridgeInvoke('sync.stop')
+    errorMessage.value = null
+    try {
+      status.value = await bridgeInvoke('sync.stop')
+      config.value = await bridgeInvoke('sync.getConfig')
+      toast.ok('定时同步已停止')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      errorMessage.value = message
+      toast.err(message)
+    }
   }
 
   async function cancel(): Promise<void> {
     toast.info('正在取消…（当前文件传完后停止）')
     status.value = await bridgeInvoke('sync.cancel')
+  }
+
+  async function pause(): Promise<void> {
+    toast.info('正在暂停…（当前文件传完后停止，可稍后继续）')
+    status.value = await bridgeInvoke('sync.pause')
   }
 
   async function runWithProgress(method: 'sync.runNow' | 'sync.retryFailed'): Promise<void> {
@@ -117,7 +145,11 @@ export const useSyncStore = defineStore('sync', () => {
     try {
       lastRunResult.value = await bridgeInvoke(method)
       await refreshAll()
-      if (lastRunResult.value.cancelled) {
+      if (lastRunResult.value.paused) {
+        toast.info(
+          `已暂停：上传 ${lastRunResult.value.uploaded}，跳过 ${lastRunResult.value.skipped}，失败 ${lastRunResult.value.failed}。可点击「继续」。`
+        )
+      } else if (lastRunResult.value.cancelled) {
         toast.info(
           `已取消：上传 ${lastRunResult.value.uploaded}，跳过 ${lastRunResult.value.skipped}，失败 ${lastRunResult.value.failed}`
         )
@@ -143,6 +175,10 @@ export const useSyncStore = defineStore('sync', () => {
   }
 
   async function runNow(): Promise<void> {
+    await runWithProgress('sync.runNow')
+  }
+
+  async function resume(): Promise<void> {
     await runWithProgress('sync.runNow')
   }
 
@@ -209,12 +245,15 @@ export const useSyncStore = defineStore('sync', () => {
     showGuide,
     failedCount,
     refreshAll,
+    refreshStatus,
     saveConfig,
     chooseFolder,
     start,
     stop,
     cancel,
+    pause,
     runNow,
+    resume,
     retryFailed,
     clearFiles,
     testConnection,

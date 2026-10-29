@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import { onShellEvent } from '../shared/bridge/client'
 import { useBridgeStore } from '../shared/bridge/useBridgeStore'
 import { useLocale } from '../shared/i18n/useLocale'
+import { useGalleryStore } from '../features/library/useGalleryStore'
 import { useSyncStore } from '../features/sync/useSyncStore'
+import { showToast, toast } from '../shared/ui/useToast'
 import UiIcon from '../shared/ui/UiIcon.vue'
 import ToastHost from '../shared/ui/ToastHost.vue'
 import logoUrl from '@brand/logo.png'
@@ -14,13 +17,21 @@ const { current, setLocale } = useLocale()
 const route = useRoute()
 const bridge = useBridgeStore()
 const sync = useSyncStore()
+const gallery = useGalleryStore()
 const bootError = ref<string | null>(null)
+let stopShellEvents: (() => void) | null = null
 
 const workNav = computed(() => [
-  { to: '/skus', label: t('nav.sku'), icon: 'tag' },
-  { to: '/library', label: t('nav.library'), icon: 'image' },
-  { to: '/sync', label: t('nav.sync'), icon: 'cloud' },
-  { to: '/logs', label: t('nav.logs'), icon: 'list' }
+  { to: '/skus', label: t('nav.sku'), icon: 'tag', badge: undefined as number | undefined },
+  { to: '/library', label: t('nav.library'), icon: 'image', badge: undefined as number | undefined },
+  { to: '/sync', label: t('nav.sync'), icon: 'cloud', badge: undefined as number | undefined },
+  { to: '/logs', label: t('nav.logs'), icon: 'list', badge: undefined as number | undefined },
+  {
+    to: '/trash',
+    label: t('nav.trash'),
+    icon: 'trash',
+    badge: gallery.trashCount > 0 ? gallery.trashCount : undefined
+  }
 ])
 
 const prefNav = computed(() => [
@@ -51,12 +62,28 @@ onMounted(async () => {
     document.head.appendChild(link)
   }
 
+  stopShellEvents = onShellEvent((event) => {
+    if (event.type === 'toast') {
+      toast[event.kind === 'ok' ? 'ok' : event.kind === 'err' ? 'err' : 'info'](event.message)
+      return
+    }
+    if (event.type === 'tray-minimized' && event.firstTime) {
+      showToast(t('shell.trayMinimizedHint'), 'info', 4200)
+    }
+  })
+
   try {
     await bridge.refreshShellStatus()
     await sync.refreshAll().catch(() => undefined)
+    await gallery.refreshTrashCount().catch(() => undefined)
   } catch (error) {
     bootError.value = error instanceof Error ? error.message : String(error)
   }
+})
+
+onUnmounted(() => {
+  stopShellEvents?.()
+  stopShellEvents = null
 })
 
 </script>
@@ -85,6 +112,7 @@ onMounted(async () => {
         >
           <UiIcon :name="item.icon" :size="17" />
           <span>{{ item.label }}</span>
+          <span v-if="item.badge != null" class="nav-badge">{{ item.badge }}</span>
         </RouterLink>
       </div>
 

@@ -37,3 +37,9 @@ export function onTaskProgress(
 ): () => void {
   return getApi().onProgress(listener)
 }
+
+export function onShellEvent(
+  listener: (event: import('@shared/ipc').ShellEvent) => void
+): () => void {
+  return getApi().onShellEvent(listener)
+}

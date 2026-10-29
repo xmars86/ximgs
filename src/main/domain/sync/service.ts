@@ -1,3 +1,4 @@
+import { existsSync, unlinkSync } from 'node:fs'
 import { dialog, BrowserWindow } from 'electron'
 import { AppError } from '@shared/errors'
 import type {
@@ -16,13 +17,20 @@ import {
   clearAllSyncFiles,
   countByStatus,
   countSyncedUploadsByLocalDay,
-  deleteSyncFileById,
+  countTrashedSyncFiles,
+  getSyncFileById,
   listSyncFiles,
-  sumSyncedBytes
+  purgeSyncFileById,
+  restoreSyncFileById,
+  sumSyncedBytes,
+  trashSyncFileById
 } from '@main/db/repos/syncFiles'
-import { listSyncRuns } from '@main/db/repos/syncRuns'
+import { clearAllSyncRuns, countSyncRuns, listSyncRuns } from '@main/db/repos/syncRuns'
 import { isSyncRunInProgress } from './runner'
-import { buildPublicUrl } from './objectKey'
+import { buildObjectKey, buildPublicUrl } from './objectKey'
+import { resolveLocalMediaPath } from './localPath'
+import { createUploadContext } from './uploadContext'
+import { log } from '@main/runtime/logger'
 import {
   uploadClipboardImage,
   uploadMultipleImages,
@@ -42,7 +50,7 @@ import {
   deriveRegionalPublicBase,
   isRegionalProvider
 } from '@shared/regional'
-import { createS3Client } from '@main/providers/s3'
+import { createS3Client, deleteObjectFileVerified } from '@main/providers/s3'
 import { clearSyncSecret, hasSyncSecret, loadSyncSecret, saveSyncSecret } from './secrets'
 import {
   assertReadyToTestConnection,
@@ -51,8 +59,10 @@ import {
 import {
   bootstrapSchedulerFromSettings,
   cancelRunTracked,
+  clearLastRunSnapshot,
   getSchedulerSnapshot,
-  restartSchedulerIfRunning,
+  isSchedulerRunning,
+  pauseRunTracked,
   retryFailedTracked,
   runNowTracked,
   startScheduler,
@@ -128,6 +138,7 @@ export function setConfig(update: SyncConfigUpdate): SyncConfigPublic {
     publicBaseUrl = deriveRegionalPublicBase(provider, nextBucket, nextRegion, nextPublic)
   }
 
+  const prevInterval = getSyncSettings().intervalMinutes
   updateSyncSettings({
     watchFolder: update.watchFolder,
     intervalMinutes: update.intervalMinutes,
@@ -142,9 +153,14 @@ export function setConfig(update: SyncConfigUpdate): SyncConfigPublic {
     sseMode: update.sseMode
   })
 
-  restartSchedulerIfRunning()
+  // Keep scheduler aligned with autoStart + watchFolder; re-arm only when interval changes.
   const next = getPublicConfig()
-  if (next.autoStart && next.watchFolder && !getSchedulerSnapshot().isSchedulerRunning) {
+  const shouldRun = Boolean(next.autoStart && next.watchFolder)
+  if (!shouldRun) {
+    stopScheduler()
+  } else if (!isSchedulerRunning()) {
+    startScheduler()
+  } else if (next.intervalMinutes !== prevInterval) {
     startScheduler()
   }
   return next
@@ -203,6 +219,11 @@ export function cancel() {
   return cancelRunTracked()
 }
 
+/** Pause the current sync/retry batch between files; resume with runNow. */
+export function pause() {
+  return pauseRunTracked()
+}
+
 export async function runNow() {
   return runNowTracked()
 }
@@ -213,6 +234,41 @@ export async function retryFailed() {
 
 export function listRuns(limit = 100) {
   return { items: listSyncRuns(limit) }
+}
+
+/** Clears all local sync_runs history; does not touch sync_files or remote objects. */
+export async function clearRuns(): Promise<{ deleted: number; cancelled: boolean }> {
+  if (isSyncRunInProgress()) {
+    throw new AppError('SYNC_BUSY', '同步进行中，请先取消或等待结束后再清空日志')
+  }
+
+  const previewTotal = countSyncRuns()
+  if (previewTotal === 0) {
+    return { deleted: 0, cancelled: false }
+  }
+
+  const win = BrowserWindow.getFocusedWindow()
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    buttons: ['清空日志', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+    title: '清空同步日志',
+    message: `确认清空全部 ${previewTotal} 条同步运行记录？`,
+    detail: '仅删除本地 sync_runs 历史。失败文件状态与云端对象不会受影响。'
+  }
+  const box = win
+    ? await dialog.showMessageBox(win, options)
+    : await dialog.showMessageBox(options)
+  if (box.response !== 0) {
+    return { deleted: 0, cancelled: true }
+  }
+
+  const result = clearAllSyncRuns()
+  clearLastRunSnapshot()
+  log.info('Cleared sync runs', { deleted: result.deleted })
+  return { deleted: result.deleted, cancelled: false }
 }
 
 function withEncodedPublicUrls<T extends { items: { objectKey: string | null; publicUrl: string | null }[] }>(
@@ -229,12 +285,13 @@ function withEncodedPublicUrls<T extends { items: { objectKey: string | null; pu
   }
 }
 
-export function listFiles(query: SyncFileQuery = {}) {
+export async function listFiles(query: SyncFileQuery = {}) {
   const result = listSyncFiles(query.limit ?? 500, query.offset ?? 0, {
     search: query.search,
     status: query.status,
     pathPrefix: query.pathPrefix,
-    directOnly: query.directOnly
+    directOnly: query.directOnly,
+    trashOnly: query.trashOnly
   })
   return withEncodedPublicUrls(result)
 }
@@ -245,7 +302,7 @@ export function getDailyUploadStats(days = 7): SyncDailyUploadStats {
   return summarizeDailyUploadStats(fillDailyUploadSeries(counts, dayCount))
 }
 
-export function getStatusCounts(): SyncFileStatusCounts {
+export async function getStatusCounts(): Promise<SyncFileStatusCounts> {
   const counts = countByStatus()
   const synced = counts.synced ?? 0
   const pending = counts.pending ?? 0
@@ -261,11 +318,12 @@ export function getStatusCounts(): SyncFileStatusCounts {
   }
 }
 
-export function browseFiles(query: SyncFileQuery = {}) {
+export async function browseFiles(query: SyncFileQuery = {}) {
   const result = browseSyncFiles(query.limit ?? 500, query.offset ?? 0, {
     search: query.search,
     status: query.status,
-    pathPrefix: query.pathPrefix
+    pathPrefix: query.pathPrefix,
+    trashOnly: query.trashOnly
   })
   return withEncodedPublicUrls(result)
 }
@@ -320,12 +378,204 @@ export async function chooseAndUploadSingle(
   return uploadMultipleImages(paths, { folderPath })
 }
 
-/** Removes the local gallery record only; does not delete the remote object. */
+/** Move gallery record into recycle bin; does not delete disk/remote objects. */
 export function deleteFile(id: number): { deleted: boolean } {
   if (!Number.isFinite(id) || id <= 0) {
     throw new AppError('INVALID_REQUEST', '无效的素材 ID')
   }
-  return { deleted: deleteSyncFileById(id) }
+  return { deleted: trashSyncFileById(id) }
+}
+
+export function restoreFile(id: number): { restored: boolean } {
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError('INVALID_REQUEST', '无效的素材 ID')
+  }
+  return { restored: restoreSyncFileById(id) }
+}
+
+function normalizeObjectKey(key: string): string {
+  return key.replace(/\\/g, '/').replace(/^\/+/, '').trim()
+}
+
+/** Collect candidate object keys (stored / rebuilt / derived from public URL). */
+function collectRemoteObjectKeys(
+  row: { objectKey: string | null; relativePath: string; publicUrl: string | null; status: string },
+  objectPrefix: string,
+  publicBaseUrl: string
+): string[] {
+  const keys: string[] = []
+  const push = (value: string | null | undefined): void => {
+    if (!value) return
+    const key = normalizeObjectKey(value)
+    if (key && !keys.includes(key)) keys.push(key)
+  }
+
+  push(row.objectKey)
+  if (row.status === 'synced' || row.publicUrl || row.objectKey) {
+    push(buildObjectKey(objectPrefix, row.relativePath))
+  }
+  const base = publicBaseUrl.trim().replace(/\/+$/, '')
+  const url = row.publicUrl?.trim() ?? ''
+  if (base && url.startsWith(`${base}/`)) {
+    const raw = url.slice(base.length + 1)
+    try {
+      push(decodeURIComponent(raw))
+    } catch {
+      push(raw)
+    }
+  }
+  return keys
+}
+
+/** Best-effort: CDN may still HIT after origin versions are gone. */
+async function warnIfPublicUrlStillCached(publicUrl: string, id: number): Promise<void> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8_000)
+    const res = await fetch(publicUrl, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal
+    })
+    clearTimeout(timer)
+    if (res.ok) {
+      log.warn(
+        'Origin object purged but public URL still returns OK (likely CDN cache; purge CDN or wait for TTL)',
+        {
+          id,
+          publicUrl,
+          status: res.status,
+          cfCache: res.headers.get('cf-cache-status'),
+          age: res.headers.get('age')
+        }
+      )
+    }
+  } catch (error) {
+    log.debug('Public URL cache probe skipped', {
+      id,
+      publicUrl,
+      error: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
+/**
+ * Permanent delete from recycle bin:
+ * 1) delete remote object (all versions when supported) — abort on failure
+ * 2) delete local file under watch folder — abort on failure
+ * 3) delete DB row (SKU bindings cascade)
+ */
+export async function purgeFile(id: number): Promise<{ purged: boolean }> {
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError('INVALID_REQUEST', '无效的素材 ID')
+  }
+
+  const row = getSyncFileById(id)
+  if (!row || !row.isTrashed) {
+    return { purged: false }
+  }
+
+  const settings = getSyncSettings()
+  const candidateKeys = collectRemoteObjectKeys(row, settings.objectPrefix, settings.publicBaseUrl)
+  const needsRemote = candidateKeys.length > 0 || Boolean(row.publicUrl) || row.status === 'synced'
+
+  if (needsRemote) {
+    if (candidateKeys.length === 0) {
+      throw new AppError(
+        'REMOTE_KEY_MISSING',
+        '无法确定云端对象键，已中止彻底删除（请检查同步配置后重试）'
+      )
+    }
+    const secret = loadSyncSecret()
+    if (!secret) {
+      throw new AppError('S3_SECRET_MISSING', '缺少密钥，无法删除云端对象；已中止彻底删除')
+    }
+    const ctx = createUploadContext(secret)
+    try {
+      let confirmedGone = false
+      let lastError: unknown = null
+      let deletedKey: string | null = null
+      for (const objectKey of candidateKeys) {
+        try {
+          log.info('Purging remote object', { id, bucket: ctx.bucket, objectKey })
+          const result = await deleteObjectFileVerified(ctx.client, ctx.bucket, objectKey)
+          log.info('Purged remote object', { id, objectKey, result })
+          confirmedGone = true
+          if (result === 'deleted') {
+            deletedKey = objectKey
+            break
+          }
+        } catch (error) {
+          lastError = error
+          log.warn('Remote purge candidate failed', {
+            id,
+            objectKey,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        }
+      }
+      if (!confirmedGone) {
+        const message =
+          lastError instanceof Error ? lastError.message : String(lastError ?? '未知错误')
+        throw new AppError(
+          'REMOTE_DELETE_FAILED',
+          `云端删除失败，未删除本地文件：${message}`,
+          { cause: lastError }
+        )
+      }
+      // Custom CDN (e.g. Cloudflare in front of B2) may keep serving a HIT after origin purge.
+      const publicUrl = row.publicUrl?.trim()
+      if (publicUrl && deletedKey) {
+        void warnIfPublicUrlStillCached(publicUrl, id)
+      }
+    } catch (error) {
+      if (error instanceof AppError) throw error
+      const message = error instanceof Error ? error.message : String(error)
+      throw new AppError(
+        'REMOTE_DELETE_FAILED',
+        `云端删除失败，未删除本地文件：${message}`,
+        { cause: error }
+      )
+    } finally {
+      ctx.client.destroy()
+    }
+  }
+
+  const watchFolder = settings.watchFolder?.trim()
+  if (!watchFolder) {
+    throw new AppError('WATCH_FOLDER_MISSING', '未配置同步目录，无法删除本地文件；已中止彻底删除')
+  }
+  const localPath = resolveLocalMediaPath(watchFolder, row.relativePath)
+  if (!localPath) {
+    throw new AppError(
+      'LOCAL_PATH_INVALID',
+      `无法解析本地路径（${row.relativePath}），已中止彻底删除`
+    )
+  }
+  if (existsSync(localPath)) {
+    try {
+      unlinkSync(localPath)
+      if (existsSync(localPath)) {
+        throw new Error('unlink 后文件仍存在（可能无删除权限）')
+      }
+      log.info('Purged local file', { id, localPath })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new AppError(
+        'LOCAL_DELETE_FAILED',
+        `云端已处理，但本地文件删除失败：${message}`,
+        { cause: error }
+      )
+    }
+  } else {
+    log.info('Local file already missing; continue purge', { id, localPath })
+  }
+
+  return { purged: purgeSyncFileById(id) }
+}
+
+export function getTrashCount(): { count: number } {
+  return { count: countTrashedSyncFiles() }
 }
 
 /** Clears all local sync_files rows; does not delete remote objects. */
@@ -334,8 +584,10 @@ export async function clearFiles(): Promise<{ deleted: number; cancelled: boolea
     throw new AppError('SYNC_BUSY', '同步进行中，请先取消或等待结束后再清空记录')
   }
 
-  const preview = listSyncFiles(1, 0)
-  if (preview.total === 0) {
+  const activeTotal = listSyncFiles(1, 0).total
+  const trashTotal = countTrashedSyncFiles()
+  const previewTotal = activeTotal + trashTotal
+  if (previewTotal === 0) {
     return { deleted: 0, cancelled: false }
   }
 
@@ -347,9 +599,9 @@ export async function clearFiles(): Promise<{ deleted: number; cancelled: boolea
     cancelId: 1,
     noLink: true,
     title: '清空同步记录',
-    message: `确认清空全部 ${preview.total} 条本地同步记录？`,
+    message: `确认清空全部 ${previewTotal} 条本地同步记录？`,
     detail:
-      '素材库列表也会一并清空。云端已上传的文件不会被删除。清空后再次同步会重新上传覆盖同名对象。'
+      '素材库与回收站都会清空。云端已上传的文件不会被删除。清空后再次同步会重新上传覆盖同名对象。'
   }
   const box = win
     ? await dialog.showMessageBox(win, options)

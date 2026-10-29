@@ -14,6 +14,7 @@ import { putObjectFile } from '@main/providers/s3'
 import { b2PublicUrl, putB2ObjectFile } from '@main/providers/backblaze'
 import { isImageFileName } from './scanner'
 import { buildObjectKey, buildPublicUrl } from './objectKey'
+import { scheduleMirrorToWatchFolder } from './mirrorLocal'
 import { loadSyncSecret } from './secrets'
 import { createUploadContext } from './uploadContext'
 
@@ -91,6 +92,8 @@ export async function uploadSingleImage(
     const md5 = await md5File(filePath)
     const existingByMd5 = findSyncedByMd5(md5)
     if (existingByMd5?.publicUrl) {
+      // Best-effort: ensure watch folder has the same relative path as the existing cloud row.
+      scheduleMirrorToWatchFolder(filePath, existingByMd5.relativePath)
       return {
         uploaded: false,
         deduplicated: true,
@@ -126,6 +129,8 @@ export async function uploadSingleImage(
     if (!file) {
       throw new AppError('UPLOAD_RECORD_MISSING', '上传成功但写入素材库记录失败')
     }
+    // Cloud success is authoritative; local mirror failures are logged + retried separately.
+    scheduleMirrorToWatchFolder(filePath, relativePath)
     return { uploaded: true, deduplicated: false, file }
   } finally {
     ctx.client.destroy()

@@ -5,6 +5,7 @@ import type {
   CreateSkuInput,
   SetSkuCoverInput,
   UnbindSkuImageInput,
+  UnbindSkuImagesInput,
   UpdateSkuInput
 } from '@shared/sku'
 import * as sku from '@main/domain/sku/service'
@@ -50,12 +51,25 @@ export function handleSku(): Partial<Record<IpcMethod, Handler>> {
         imageId: requirePositiveId(obj.imageId, '图片 ID')
       } as UnbindSkuImageInput)
     },
+    'sku.unbindImages': (data) => {
+      const obj = asObject(data)
+      return sku.unbindImages({
+        skuId: requirePositiveId(obj.skuId, 'SKU ID'),
+        imageIds: Array.isArray(obj.imageIds) ? obj.imageIds.map(Number) : []
+      } as UnbindSkuImagesInput)
+    },
     'sku.setCover': (data) => {
       const obj = asObject(data)
       return sku.setCover({
         skuId: requirePositiveId(obj.skuId, 'SKU ID'),
         imageId: requirePositiveId(obj.imageId, '图片 ID')
       } as SetSkuCoverInput)
+    },
+    'sku.downloadImportTemplate': () => sku.downloadImportTemplate(),
+    'sku.importCsv': (data) => {
+      const obj = asObject(data)
+      const filePath = typeof obj.filePath === 'string' ? obj.filePath : ''
+      return sku.importFromCsv(filePath)
     }
   }
 }

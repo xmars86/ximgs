@@ -6,6 +6,7 @@ import { handleDb } from './db'
 import { handleLibrary } from './library'
 import { handleSync } from './sync'
 import { handleSku } from './sku'
+import { handleBackup } from './backup'
 
 type Handler = (data: unknown) => unknown | Promise<unknown>
 
@@ -14,7 +15,8 @@ const handlers = {
   ...handleDb(),
   ...handleLibrary(),
   ...handleSync(),
-  ...handleSku()
+  ...handleSku(),
+  ...handleBackup()
 } as Record<IpcMethod, Handler>
 
 export async function dispatchInvoke(payload: InvokePayload) {

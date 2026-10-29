@@ -22,6 +22,7 @@ export function handleSync(): Partial<Record<IpcMethod, Handler>> {
     'sync.start': () => sync.start(),
     'sync.stop': () => sync.stop(),
     'sync.cancel': () => sync.cancel(),
+    'sync.pause': () => sync.pause(),
     'sync.runNow': () => sync.runNow(),
     'sync.listFiles': (data) => {
       const obj = asObject(data)
@@ -31,7 +32,8 @@ export function handleSync(): Partial<Record<IpcMethod, Handler>> {
         search: typeof obj.search === 'string' ? obj.search : undefined,
         status: typeof obj.status === 'string' ? obj.status : undefined,
         pathPrefix: typeof obj.pathPrefix === 'string' ? obj.pathPrefix : undefined,
-        directOnly: obj.directOnly === true
+        directOnly: obj.directOnly === true,
+        trashOnly: obj.trashOnly === true
       })
     },
     'sync.browseFiles': (data) => {
@@ -41,7 +43,8 @@ export function handleSync(): Partial<Record<IpcMethod, Handler>> {
         offset: obj.offset == null ? undefined : Number(obj.offset),
         search: typeof obj.search === 'string' ? obj.search : undefined,
         status: typeof obj.status === 'string' ? obj.status : undefined,
-        pathPrefix: typeof obj.pathPrefix === 'string' ? obj.pathPrefix : undefined
+        pathPrefix: typeof obj.pathPrefix === 'string' ? obj.pathPrefix : undefined,
+        trashOnly: obj.trashOnly === true
       })
     },
     'sync.getDailyUploadStats': (data) => {
@@ -87,6 +90,16 @@ export function handleSync(): Partial<Record<IpcMethod, Handler>> {
       const obj = asObject(data)
       return sync.deleteFile(Number(obj.id))
     },
-    'sync.clearFiles': () => sync.clearFiles()
+    'sync.restoreFile': (data) => {
+      const obj = asObject(data)
+      return sync.restoreFile(Number(obj.id))
+    },
+    'sync.purgeFile': (data) => {
+      const obj = asObject(data)
+      return sync.purgeFile(Number(obj.id))
+    },
+    'sync.getTrashCount': () => sync.getTrashCount(),
+    'sync.clearFiles': () => sync.clearFiles(),
+    'sync.clearRuns': () => sync.clearRuns()
   }
 }
